@@ -18,7 +18,9 @@ import argparse
 
 from annostat import __version__
 from annostat.analysis import COG_CATEGORY_NAMES, analyze_features
+from annostat.comparison import GenomeInput, run_comparison
 from annostat.filtering import CdsFilter
+from annostat.ncbi import fetch_genomes
 from annostat.output import (
     write_annotation_findings,
     write_cds_fastas,
@@ -47,9 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "examples:\n"
             "  %(prog)s -f genome.fna -g annotations.gff3\n"
-            "  %(prog)s -f genome.fna -g annotations.gff3 -o results --table-format tsv\n\n"
+            "  %(prog)s -f genome.fna -g annotations.gff3 -o results --table-format tsv\n"
+            "  %(prog)s compare --genome a a.fna a.gff3 --genome b b.fna b.gff3\n"
+            "  %(prog)s fetch GCF_000007145.1 -o ncbi_data\n\n"
             "The output includes an offline HTML report, analysis tables, CDS FASTA files, "
-            "and three publication-ready SVG charts."
+            "and up to three publication-ready SVG charts. Use the compare and fetch commands "
+            "for multi-genome profiles and NCBI assembly downloads."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -95,6 +100,52 @@ def build_parser() -> argparse.ArgumentParser:
         help="exclude CDS features annotated as hypothetical proteins",
     )
     parser.add_argument("--version", action="version", version=f"annostat {__version__}")
+    return parser
+
+
+def build_compare_parser() -> argparse.ArgumentParser:
+    """Build the parser for comparative annotation profiling."""
+
+    parser = argparse.ArgumentParser(
+        prog="annostat compare",
+        description="Compare two or more bacterial FASTA/GFF3 annotation datasets.",
+        epilog=(
+            "examples:\n"
+            "  annostat compare --genome genome-a a.fna a.gff3 --genome genome-b b.fna b.gff3\n"
+            "  annostat compare --genome sample sample.fna sample.gff3 --reference GCF_000007145.1\n\n"
+            "Local assemblies and external NCBI references may be combined. NCBI inputs require the official "
+            "NCBI Datasets CLI."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--genome", action="append", nargs=3, metavar=("LABEL", "FASTA", "GFF3"),
+        help="labelled local genome input; repeat for each dataset",
+    )
+    parser.add_argument(
+        "--reference", "--accession", dest="references", action="append", metavar="GCF_OR_GCA",
+        help="external NCBI assembly to include in the comparison; repeat as needed",
+    )
+    parser.add_argument(
+        "-o", "--output", type=Path, default=Path("annostat_comparison"), metavar="DIR",
+        help="output directory (default: annostat_comparison)",
+    )
+    parser.add_argument("-q", "--quiet", action="store_true", help="suppress progress and summary output")
+    return parser
+
+
+def build_fetch_parser() -> argparse.ArgumentParser:
+    """Build the parser for explicit NCBI assembly downloads."""
+
+    parser = argparse.ArgumentParser(
+        prog="annostat fetch",
+        description="Download annotated assemblies through the official NCBI Datasets CLI.",
+    )
+    parser.add_argument("accessions", nargs="+", metavar="GCF_OR_GCA")
+    parser.add_argument(
+        "-o", "--output", type=Path, default=Path("annostat_ncbi"), metavar="DIR",
+        help="extraction directory (default: annostat_ncbi)",
+    )
     return parser
 
 
@@ -157,7 +208,7 @@ def run_analysis(
     start_counts: Counter[str] = Counter()
     cds_lengths: list[int] = []
     filtered_records = []
-    quality_findings = feature_quality_findings(features)
+    quality_findings = feature_quality_findings(features, genome, circular_seqids)
 
     def observed_records():
         """Yield CDS records while collecting lengths for the histogram."""
@@ -184,6 +235,7 @@ def run_analysis(
     notify("Calculating statistics and writing analysis tables")
     stage_started = perf_counter()
     summary = analyze_features(features)
+    summary["cog_data_available"] = bool(summary["cog_category_counts"])
     summary["annostat_version"] = __version__
     summary["input_files"] = {"fasta": str(fasta_path), "gff3": str(gff_path)}
     summary["sequence_ids"] = sorted(genome)
@@ -237,14 +289,17 @@ def run_analysis(
         f"{category} - {COG_CATEGORY_NAMES.get(category, 'Unclassified')}": count
         for category, count in summary["cog_category_counts"].items()
     }
-    write_bar_chart(
-        plots_dir / "cog_categories.svg",
-        "COG category distribution",
-        cog_plot_counts,
-        description="Functional category assignments; multi-category proteins contribute to each category",
-        axis_label="COG assignments",
-        percentage_total=sum(cog_plot_counts.values()),
-    )
+    cog_plot = plots_dir / "cog_categories.svg"
+    cog_plot.unlink(missing_ok=True)
+    if summary["cog_data_available"]:
+        write_bar_chart(
+            cog_plot,
+            "COG category distribution",
+            cog_plot_counts,
+            description="Functional category assignments; multi-category proteins contribute to each category",
+            axis_label="COG assignments",
+            percentage_total=sum(cog_plot_counts.values()),
+        )
     write_histogram(
         plots_dir / "cds_lengths.svg",
         "CDS length distribution (nucleotides)",
@@ -273,10 +328,11 @@ def run_analysis(
 
     notify("Building the offline HTML report")
     plot_paths = [
-        (plots_dir / "cog_categories.svg", "COG functional categories"),
         (plots_dir / "cds_lengths.svg", "CDS length distribution"),
         (plots_dir / "start_codons.svg", "Start codon usage"),
     ]
+    if summary["cog_data_available"]:
+        plot_paths.insert(0, (cog_plot, "COG functional categories"))
     summary["output_files"] = [
         "report.html",
         "summary.json",
@@ -287,10 +343,11 @@ def run_analysis(
         "tables/annotation_issues.csv",
         "sequences/cds_nucleotide.fasta",
         "sequences/cds_protein.fasta",
-        "plots/cog_categories.svg",
         "plots/cds_lengths.svg",
         "plots/start_codons.svg",
     ]
+    if summary["cog_data_available"]:
+        summary["output_files"].insert(-2, "plots/cog_categories.svg")
     if active_filter.active:
         summary["output_files"].extend(
             (
@@ -305,13 +362,7 @@ def run_analysis(
         "peak_memory_bytes": tracemalloc.get_traced_memory()[1] if profile else None,
     }
     stage_started = perf_counter()
-    report_html = render_html_report(summary, plot_paths)
-    if profile:
-        summary["performance"]["peak_memory_bytes"] = tracemalloc.get_traced_memory()[1]
-        report_html = render_html_report(summary, plot_paths)
-    (output_dir / "report.html").write_text(
-        report_html, encoding="utf-8"
-    )
+    render_html_report(summary, plot_paths)
     stage_timings["report_generation"] = perf_counter() - stage_started
     peak_memory = tracemalloc.get_traced_memory()[1] if profile else None
     if profile:
@@ -321,6 +372,9 @@ def run_analysis(
         "total_seconds": sum(stage_timings.values()),
         "peak_memory_bytes": peak_memory,
     }
+    (output_dir / "report.html").write_text(
+        render_html_report(summary, plot_paths), encoding="utf-8"
+    )
     write_summary(output_dir / "summary.json", summary)
     return summary
 
@@ -357,7 +411,10 @@ def _print_summary(summary: dict[str, object], output_dir: Path, elapsed: float)
         ),
         (
             "COG-annotated CDS",
-            f"{int(summary['cds_with_cog_count']):,} ({_percentage(int(summary['cds_with_cog_count']), cds_count)})",
+            (
+                f"{int(summary['cds_with_cog_count']):,} ({_percentage(int(summary['cds_with_cog_count']), cds_count)})"
+                if summary["cog_data_available"] else "not available"
+            ),
         ),
         ("ATG/GTG/TTG starts", f"{standard_starts:,} ({_percentage(standard_starts, cds_count)})"),
         (
@@ -394,8 +451,14 @@ def _print_summary(summary: dict[str, object], output_dir: Path, elapsed: float)
 def main(arguments: list[str] | None = None) -> int:
     """Parse arguments, run the analysis, and report its output location."""
 
+    command_arguments = list(sys.argv[1:] if arguments is None else arguments)
+    if command_arguments[:1] == ["compare"]:
+        return _main_compare(command_arguments[1:])
+    if command_arguments[:1] == ["fetch"]:
+        return _main_fetch(command_arguments[1:])
+
     parser = build_parser()
-    args = parser.parse_args(arguments)
+    args = parser.parse_args(command_arguments)
     if (
         args.min_cds_length is not None
         and args.max_cds_length is not None
@@ -436,6 +499,75 @@ def main(arguments: list[str] | None = None) -> int:
         parser.error(str(error))
     if not args.quiet:
         _print_summary(summary, args.output, perf_counter() - started)
+    return 0
+
+
+def _main_compare(arguments: list[str]) -> int:
+    """Parse and run the comparative-analysis command."""
+
+    parser = build_compare_parser()
+    args = parser.parse_args(arguments)
+    datasets = [
+        GenomeInput(label, Path(fasta), Path(gff))
+        for label, fasta, gff in (args.genome or [])
+    ]
+    try:
+        requested_count = len(datasets) + len(args.references or [])
+        if requested_count < 2:
+            parser.error("provide at least two inputs using --genome and/or --reference")
+        requested_labels = [dataset.label for dataset in datasets] + (args.references or [])
+        if len(requested_labels) != len(set(requested_labels)):
+            parser.error("comparison genome labels and references must be unique")
+        if args.references:
+            fetched = fetch_genomes(args.references, args.output / "external_inputs")
+            datasets.extend(
+                GenomeInput(item.accession, item.fasta, item.gff, item.metadata)
+                for item in fetched
+            )
+        if not args.quiet:
+            print(f"annostat {__version__} | comparative annotation analysis")
+            for dataset in datasets:
+                print(f"  {dataset.label}: {dataset.fasta} + {dataset.gff}")
+            print()
+        step = 0
+
+        def report_progress(message: str) -> None:
+            """Print one numbered comparison-stage notification."""
+
+            nonlocal step
+            step += 1
+            print(f"[{step}/4] {message}")
+
+        summary = run_comparison(
+            datasets, args.output, None if args.quiet else report_progress
+        )
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    if not args.quiet:
+        print("\nComparison summary")
+        print("-" * 60)
+        print(f"  Datasets                 {len(summary['datasets']):>34,}")
+        print(f"  Taxonomic scope          {summary['taxonomic_scope'].replace('_', ' '):>34}")
+        print(f"  Pairwise comparisons     {len(summary['pairwise_comparisons']):>34,}")
+        print(f"  Interpretation notes     {len(summary['warnings']):>34,}")
+        print("-" * 60)
+        print(f"  Report                   {(args.output / 'comparison.html').resolve()}")
+    return 0
+
+
+def _main_fetch(arguments: list[str]) -> int:
+    """Parse and run an explicit NCBI Datasets download."""
+
+    parser = build_fetch_parser()
+    args = parser.parse_args(arguments)
+    try:
+        fetched = fetch_genomes(args.accessions, args.output)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    print(f"Downloaded {len(fetched)} annotated NCBI genome(s) to {args.output.resolve()}")
+    for item in fetched:
+        organism = item.metadata.get("organism_name") or "organism not provided"
+        print(f"  {item.accession} ({organism}): {item.fasta} + {item.gff}")
     return 0
 
 
