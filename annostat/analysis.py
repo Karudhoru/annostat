@@ -52,27 +52,38 @@ def cog_categories(feature: Feature) -> tuple[str, ...]:
 def analyze_features(features: Iterable[Feature]) -> dict[str, object]:
     """Calculate required GFF3 feature and annotation metrics."""
 
-    feature_list = list(features)
-    type_counts = Counter(feature.type for feature in feature_list)
-    rna_counts = Counter(
-        feature.type for feature in feature_list if feature.type.lower().endswith("rna")
-    )
-    cds_features = [feature for feature in feature_list if feature.type == "CDS"]
+    total_features = 0
+    cds_count = 0
+    hypothetical_cds_count = 0
+    cds_with_gene_count = 0
+    cds_with_cog_count = 0
+    type_counts: Counter[str] = Counter()
+    rna_counts: Counter[str] = Counter()
     cog_counts: Counter[str] = Counter()
-    for feature in cds_features:
-        cog_counts.update(cog_categories(feature))
+    for feature in features:
+        total_features += 1
+        type_counts[feature.type] += 1
+        if feature.type.lower().endswith("rna"):
+            rna_counts[feature.type] += 1
+        if feature.type != "CDS":
+            continue
+        cds_count += 1
+        hypothetical_cds_count += (
+            "hypothetical protein" in feature.attributes.get("product", "").lower()
+        )
+        cds_with_gene_count += "gene" in feature.attributes
+        categories = cog_categories(feature)
+        cds_with_cog_count += bool(categories)
+        cog_counts.update(categories)
 
     return {
-        "total_features": len(feature_list),
-        "cds_count": len(cds_features),
+        "total_features": total_features,
+        "cds_count": cds_count,
         "rna_counts": dict(sorted(rna_counts.items())),
         "feature_type_counts": dict(sorted(type_counts.items())),
-        "hypothetical_cds_count": sum(
-            "hypothetical protein" in feature.attributes.get("product", "").lower()
-            for feature in cds_features
-        ),
-        "cds_with_gene_count": sum("gene" in feature.attributes for feature in cds_features),
-        "cds_with_cog_count": sum(bool(cog_categories(feature)) for feature in cds_features),
+        "hypothetical_cds_count": hypothetical_cds_count,
+        "cds_with_gene_count": cds_with_gene_count,
+        "cds_with_cog_count": cds_with_cog_count,
         "cog_category_counts": dict(sorted(cog_counts.items())),
     }
 

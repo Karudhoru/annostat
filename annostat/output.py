@@ -37,9 +37,10 @@ def write_overview(path: Path, features: Iterable[Feature], delimiter: str) -> N
 
 
 def _write_fasta_record(handle: TextIO, header: str, sequence: str) -> None:
-    handle.write(f">{header}\n")
-    for offset in range(0, len(sequence), 60):
-        handle.write(sequence[offset : offset + 60] + "\n")
+    wrapped_sequence = "\n".join(
+        sequence[offset : offset + 60] for offset in range(0, len(sequence), 60)
+    )
+    handle.write(f">{header}\n{wrapped_sequence}\n")
 
 
 def write_cds_fastas(output_dir: Path, records: Iterable[CdsSequence]) -> None:

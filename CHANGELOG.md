@@ -7,6 +7,45 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-07
+
+### Added
+
+- A self-contained offline `report.html` containing the main annotation metrics,
+  provenance, performance information, codon summary, and embedded SVG figures.
+- `--profile` for peak Python-memory measurement and per-stage terminal timings.
+- Structured `tables/`, `sequences/`, and `plots/` output directories.
+- Mean and median markers in the CDS-length distribution.
+- Counts and percentages in the COG and start-codon charts.
+- The five most-used codons in `summary.json` and the HTML report.
+
+### Changed
+
+- CDS extraction, translation, codon accumulation, and FASTA export now operate
+  as a streaming pipeline.
+- Translation and codon counting share one codon traversal.
+- FASTA records are written in buffered blocks rather than one line per write.
+- Feature and COG statistics are calculated in a single pass.
+- Start codons are grouped as ATG, GTG, TTG, and Other in the visualization while
+  the complete raw counts remain available in `start_codons.csv`.
+- Updated the package version to 0.3.0.
+
+### Removed
+
+- The default 64-codon heatmap. Codon usage remains fully available in the
+  assignment-required `codon_usage.csv` percentage table.
+
+### Performance
+
+- The supplied `GCF_000007145.1` dataset averaged 0.480 seconds versus 0.562
+  seconds for version 0.2.0 in the same local benchmark, a 14.6% improvement
+  while also generating the new HTML report.
+
+### Compatibility
+
+- All six table and FASTA outputs shared with version 0.2.0 remain byte-for-byte
+  identical for both supplied datasets.
+
 ## [0.2.0] - 2026-08-07
 
 ### Added
