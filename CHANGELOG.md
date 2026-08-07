@@ -7,6 +7,31 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-07
+
+### Added
+
+- A consolidated `tables/annotation_issues.csv` containing conservative
+  annotation-quality findings with severity, coordinates, related features, and
+  human-readable details.
+- Detection of overlapping and fully contained CDS pairs, explicitly marked
+  pseudogenes, partial features, adjacent duplicate annotations, non-triplet
+  CDS lengths, internal stop codons, and ambiguous coding bases.
+- Structural-RNA completeness checks for 5S, 16S, and 23S rRNAs and tRNAs for
+  the 20 standard amino acids.
+- Genome GC percentage, non-duplicated coding density, CDS density, and
+  severity-grouped QC counts in `summary.json`, the CLI, and the HTML report.
+- Optional filtered CDS exports through `--min-cds-length`,
+  `--max-cds-length`, `--require-cog`, and `--exclude-hypothetical`.
+
+### Changed
+
+- Filtered records are written separately under `filtered/`; the complete
+  assignment-required analysis and outputs always remain unchanged.
+- The HTML report now includes annotation-quality findings and documents active
+  filter criteria without adding another default plot.
+- Updated the package version to 0.4.0.
+
 ## [0.3.0] - 2026-08-07
 
 ### Added

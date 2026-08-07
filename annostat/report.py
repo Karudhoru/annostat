@@ -47,6 +47,8 @@ def render_html_report(
     cog_annotated = int(summary["cds_with_cog_count"])
     start_counts = summary["start_codon_counts"]
     standard_starts = sum(start_counts.get(codon, 0) for codon in ("ATG", "GTG", "TTG"))
+    quality = summary["quality_control"]
+    filtered_export = summary["filtered_export"]
     input_files = summary["input_files"]
     performance = summary["performance"]
     stage_rows = "".join(
@@ -65,8 +67,30 @@ def render_html_report(
             _metric("Features", f'{int(summary["total_features"]):,}', f'{cds_count:,} coding sequences'),
             _metric("COG coverage", _percentage(cog_annotated, cds_count), f'{cog_annotated:,} annotated CDS'),
             _metric("Recognized starts", _percentage(standard_starts, cds_count), f'{standard_starts:,} ATG/GTG/TTG'),
+            _metric("Genome GC", f'{quality["genome_gc_percent"]:.2f}%', "whole-genome composition"),
+            _metric("Coding density", f'{quality["coding_density_percent"]:.2f}%', "non-duplicated CDS coverage"),
         )
     )
+    quality_rows = "".join(
+        f"<tr><td>{escape(issue.replace('_', ' ').title())}</td><td>{count:,}</td></tr>"
+        for issue, count in quality["issue_counts"].items()
+    ) or "<tr><td>No findings</td><td>0</td></tr>"
+    filter_panel = ""
+    if filtered_export["active"]:
+        criteria = []
+        if filtered_export["min_length"] is not None:
+            criteria.append(f'minimum length {filtered_export["min_length"]:,} bp')
+        if filtered_export["max_length"] is not None:
+            criteria.append(f'maximum length {filtered_export["max_length"]:,} bp')
+        if filtered_export["require_cog"]:
+            criteria.append("COG annotation required")
+        if filtered_export["exclude_hypothetical"]:
+            criteria.append("hypothetical proteins excluded")
+        filter_panel = (
+            '<section class="panel"><h2>Filtered CDS export</h2>'
+            f'<p><strong>{filtered_export["selected_cds_count"]:,}</strong> CDS matched: '
+            f'{escape(", ".join(criteria))}.</p></section>'
+        )
     figures = "".join(_embedded_svg(path, heading) for path, heading in plot_paths)
     generated_files = [
         path for path in summary["output_files"] if path != "report.html"
@@ -115,6 +139,7 @@ table{{width:100%;border-collapse:collapse}} td{{border-bottom:1px solid var(--l
 </section>
 <section class="figures">{figures}</section>
 <section class="summary-grid">
+  <article class="panel"><h2>Annotation quality findings</h2><table>{quality_rows}<tr><td>Total findings</td><td>{quality["finding_count"]:,}</td></tr></table><p class="metric-note">Findings are conservative review candidates, not automatic biological errors.</p></article>
   <article class="panel"><h2>Performance</h2><table>{stage_rows}<tr><td>Total measured stages</td><td>{performance["total_seconds"]:.4f} s</td></tr><tr><td>Peak Python memory</td><td>{escape(peak_memory_text)}</td></tr></table></article>
   <article class="panel"><h2>Methods and provenance</h2><dl>
     <dt>Translation table</dt><dd>NCBI bacterial genetic code 11</dd>
@@ -123,6 +148,7 @@ table{{width:100%;border-collapse:collapse}} td{{border-bottom:1px solid var(--l
     <dt>Codon calculation</dt><dd>Pooled across complete CDS codons</dd>
   </dl></article>
 </section>
+{filter_panel}
 <section class="panel"><h2>Generated data files</h2><ul class="files">{file_links}</ul></section>
 <footer>Generated locally by annostat {escape(str(summary["annostat_version"]))}. The report contains no external scripts, fonts, or network resources.</footer>
 </main>
