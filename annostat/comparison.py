@@ -366,7 +366,7 @@ def _render_report(summary: dict[str, object], plot_paths: list[Path]) -> str:
     )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>annostat comparison report</title><style>
+<title>Annostat comparison report</title><style>
 :root{{--ink:#17231e;--muted:#64746c;--line:#dbe5df;--paper:#fff;--bg:#f4f7f5;--green:#096b4f;--soft:#e7f4ee;--warn:#fff8e6;--warn-line:#e7c45c}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Inter,Segoe UI,Arial,sans-serif}}
 header{{background:#0b533e;color:#fff;padding:20px max(24px,calc((100% - 1180px)/2))}}header span{{float:right;color:#d9eee6}}main{{max-width:1180px;margin:auto;padding:34px 24px 64px}}
@@ -377,7 +377,7 @@ table{{border-collapse:collapse;width:100%;white-space:nowrap}}th{{color:var(--m
 .figure svg{{display:block;height:auto;max-width:100%;width:100%}}.notice{{background:var(--warn);border-color:var(--warn-line)}}.notice ul{{margin:8px 0 0;padding-left:20px}}.note{{color:var(--muted);font-size:13px}}
 details summary{{cursor:pointer;font-weight:700}}details .table-wrap{{margin-top:14px}}.downloads{{display:flex;gap:18px;flex-wrap:wrap}}a{{color:var(--green);font-weight:600}}footer{{border-top:1px solid var(--line);color:var(--muted);font-size:12px;margin-top:28px;padding-top:16px}}
 @media(max-width:700px){{header span{{display:block;float:none;margin-top:3px}}main{{padding:26px 14px 48px}}h1{{font-size:28px}}.panel,.figure,details,.notice{{padding:14px}}}}@media print{{body{{background:#fff}}main{{max-width:none;padding:12px}}.panel,.figure,details,.notice{{break-inside:avoid}}}}
-</style></head><body><header><strong>annostat comparison</strong><span>version {escape(str(summary["annostat_version"]))}</span></header><main>
+</style></head><body><header><strong>Annostat comparison</strong><span>version {escape(str(summary["annostat_version"]))}</span></header><main>
 <h1>Genome annotation comparison</h1><p class="subtitle">A normalized comparison of annotated bacterial assemblies. Dataset labels do not imply strain-level relatedness.</p>
 <div class="tags"><span class="tag">{len(profiles)} assemblies</span><span class="tag">{escape(scope_label)}</span></div>
 {warning_panel}
@@ -387,7 +387,7 @@ details summary{{cursor:pointer;font-weight:700}}details .table-wrap{{margin-top
 <p class="note">Jaccard values range from 0 to 1 and describe exact annotation-label overlap. Profile distances range from 0 (same distribution) to 1 (maximally different). Neither measure establishes orthology, ANI, or phylogeny.</p></section>
 <details><summary>Input sources and reproducibility</summary><div class="table-wrap"><table><thead><tr><th>Dataset</th><th>Assembly</th><th>Annotation</th><th>FASTA</th><th>GFF3</th></tr></thead><tbody>{provenance_rows}</tbody></table></div><p class="note">Complete paths, file checksums, NCBI metadata, and calculation details are retained in comparison.json.</p></details>
 <section class="panel"><h2>Download results</h2><div class="downloads"><a href="tables/dataset_metrics.tsv">Dataset metrics</a><a href="tables/pairwise_comparisons.tsv">Pairwise comparisons</a><a href="comparison.json">Complete JSON</a>{''.join(f'<a href="plots/{escape(path.name)}">{escape(path.stem.replace("_", " ").title())} (SVG)</a>' for path in plot_paths)}</div></section>
-<footer>Generated locally by annostat. The report contains no external scripts or network resources.</footer>
+<footer>Generated locally by Annostat. The report contains no external scripts or network resources.</footer>
 </main></body></html>"""
 
 

@@ -29,7 +29,7 @@ def fetch_genomes(accessions: list[str], output_dir: Path) -> list[FetchedGenome
     """Download and extract FASTA/GFF3 pairs using NCBI's official CLI.
 
     The external ``datasets`` command owns networking, API-key handling, and ZIP
-    validation. AnnStat only validates assembly accessions and exposes the two
+    validation. Annostat only validates assembly accessions and exposes the two
     files needed by its local analysis workflows.
     """
 
