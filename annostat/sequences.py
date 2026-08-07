@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections import Counter
+from collections.abc import Iterable, Mapping, MutableMapping
 
 from annostat.models import CdsSequence, Feature
 
@@ -74,17 +75,22 @@ def extract_feature_sequence_with_topology(
     return reverse_complement(sequence) if feature.strand == "-" else sequence.upper()
 
 
-def translate_dna(sequence: str) -> str:
+def translate_dna(
+    sequence: str,
+    *,
+    codon_counts: Counter[str] | None = None,
+) -> str:
     """Translate complete codons with bacterial genetic code 11 start behavior."""
 
     sequence = sequence.upper()
-    amino_acids: list[str] = []
-    for offset in range(0, len(sequence) - 2, 3):
-        codon = sequence[offset : offset + 3]
-        amino_acid = _CODON_TABLE.get(codon, "X")
-        if offset == 0 and codon in _BACTERIAL_START_CODONS:
-            amino_acid = "M"
-        amino_acids.append(amino_acid)
+    codons = [
+        sequence[offset : offset + 3] for offset in range(0, len(sequence) - 2, 3)
+    ]
+    if codon_counts is not None:
+        codon_counts.update(codons)
+    amino_acids = [_CODON_TABLE.get(codon, "X") for codon in codons]
+    if codons and codons[0] in _BACTERIAL_START_CODONS:
+        amino_acids[0] = "M"
     if amino_acids and amino_acids[-1] == "*":
         amino_acids.pop()
     return "".join(amino_acids)
@@ -97,19 +103,31 @@ def extract_cds_sequences(
 ) -> list[CdsSequence]:
     """Extract and translate every CDS feature."""
 
-    records: list[CdsSequence] = []
+    return list(iter_cds_sequences(features, genome, circular_seqids))
+
+
+def iter_cds_sequences(
+    features: Iterable[Feature],
+    genome: Mapping[str, str],
+    circular_seqids: frozenset[str] = frozenset(),
+    *,
+    codon_counts: Counter[str] | None = None,
+    start_counts: MutableMapping[str, int] | None = None,
+) -> Iterable[CdsSequence]:
+    """Yield CDS records while optionally accumulating codon statistics."""
+
     for feature in features:
         if feature.type != "CDS":
             continue
         nucleotide = extract_feature_sequence_with_topology(feature, genome, circular_seqids)
         phase = feature.phase or 0
         coding_nucleotide = nucleotide[phase:]
-        records.append(
-            CdsSequence(
-                feature=feature,
-                nucleotide=nucleotide,
-                coding_nucleotide=coding_nucleotide,
-                protein=translate_dna(coding_nucleotide),
-            )
+        if start_counts is not None and len(coding_nucleotide) >= 3:
+            start = coding_nucleotide[:3].upper()
+            start_counts[start] = start_counts.get(start, 0) + 1
+        yield CdsSequence(
+            feature=feature,
+            nucleotide=nucleotide,
+            coding_nucleotide=coding_nucleotide,
+            protein=translate_dna(coding_nucleotide, codon_counts=codon_counts),
         )
-    return records
