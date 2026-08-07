@@ -8,6 +8,36 @@ from collections.abc import Iterable
 from annostat.models import CdsSequence, Feature
 
 
+COG_CATEGORY_NAMES = {
+    "A": "RNA processing and modification",
+    "B": "Chromatin structure and dynamics",
+    "C": "Energy production and conversion",
+    "D": "Cell cycle control and division",
+    "E": "Amino acid metabolism and transport",
+    "F": "Nucleotide metabolism and transport",
+    "G": "Carbohydrate metabolism and transport",
+    "H": "Coenzyme metabolism",
+    "I": "Lipid metabolism",
+    "J": "Translation and ribosome biogenesis",
+    "K": "Transcription",
+    "L": "Replication, recombination and repair",
+    "M": "Cell wall and membrane biogenesis",
+    "N": "Cell motility",
+    "O": "Protein turnover and chaperones",
+    "P": "Inorganic ion transport and metabolism",
+    "Q": "Secondary metabolite biosynthesis",
+    "R": "General function prediction only",
+    "S": "Function unknown",
+    "T": "Signal transduction",
+    "U": "Intracellular trafficking and secretion",
+    "V": "Defense mechanisms",
+    "W": "Extracellular structures",
+    "X": "Mobilome: prophages and transposons",
+    "Y": "Nuclear structure",
+    "Z": "Cytoskeleton",
+}
+
+
 def cog_categories(feature: Feature) -> tuple[str, ...]:
     """Extract individual COG category letters from a Dbxref attribute."""
 
