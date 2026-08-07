@@ -7,6 +7,72 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Single-genome CLI and HTML output now report absent COG annotations as
+  unavailable and omit stale or empty COG plots.
+- HTML and JSON performance sections now use the same measured stage timings.
+- Circular-origin CDS intervals now participate correctly in overlap detection
+  and non-duplicated coding-density calculations.
+- CDS-length histogram mean and median markers now reach the exact maximum of
+  the plotted coordinate scale.
+- Multi-genome overview labels use non-overlapping rows, and long plot labels
+  are shortened visually while retaining full SVG tooltips.
+- Placeholder organism labels such as `uncultured bacterium` and `Genus sp.` no
+  longer produce guessed species relationships.
+
+### Added
+
+- NCBI assembly links and direct SVG download links in comparative HTML reports.
+- Documentation of GFF3/FASTA assumptions, circular coordinates, COG
+  availability, and the current multi-part CDS limitation.
+- Regression coverage for missing single-genome COG data, circular-origin QC,
+  conservative species parsing, report timings, and stricter GFF3 fields.
+
+## [0.5.0] - 2026-08-07
+
+### Added
+
+- `annostat compare` for normalized, QC-aware comparison of two or more labelled
+  FASTA/GFF3 annotation datasets.
+- Dataset metrics and pairwise TSV tables containing scalar deltas,
+  Jensen-Shannon COG/start-profile distances, and exact gene-symbol/COG-ID
+  Jaccard overlap.
+- A self-contained comparative HTML report with SHA-256 input provenance,
+  interpretation warnings, and explicit scientific limitations.
+- Two focused comparison figures: a normalized annotation overview and an
+  adaptive two-genome COG difference chart or multi-genome heatmap.
+- Optional NCBI connectivity through `annostat fetch` and repeatable
+  `annostat compare --reference`, using the official NCBI Datasets CLI.
+- Versioned GCF/GCA accession validation and path-safe extraction of downloaded
+  NCBI data packages.
+
+### Changed
+
+- Updated the package version to 0.5.0.
+- Expanded CLI help and README documentation for local and accession-based
+  comparative workflows.
+- Dataset labels are taxonomically neutral; local GFF3 and NCBI assembly
+  metadata now identify organisms and same-species or different-species pairs.
+- Simplified the comparative HTML report, moved detailed reproducibility data
+  into a collapsed section and JSON, and corrected wide-table/figure layout.
+- External NCBI assemblies are now presented as first-class comparison
+  references rather than only as standalone downloads.
+
+### Fixed
+
+- Missing COG annotations from sources such as current NCBI RefSeq GFF3
+  packages are reported as unavailable rather than as zero coverage.
+- COG overlap, distance, and comparison plots are omitted whenever an involved
+  dataset lacks COG data, preventing misleading comparisons against zero.
+
+### Scientific scope
+
+- Gene-symbol overlap is explicitly reported as annotation-label similarity,
+  not orthology or core/accessory genome inference.
+- AnnStat does not implement approximate ANI, phylogeny, or homolog clustering;
+  those analyses remain delegated to specialized tools.
+
 ## [0.4.0] - 2026-08-07
 
 ### Added
