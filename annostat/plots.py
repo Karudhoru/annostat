@@ -6,6 +6,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from html import escape
 from pathlib import Path
+from statistics import mean, median
 
 
 _INK = "#0f172a"
@@ -48,15 +49,16 @@ def write_bar_chart(
     description: str = "Counts across annotated coding sequences",
     axis_label: str = "Count",
     sort_by_value: bool = True,
+    percentage_total: int | None = None,
 ) -> None:
-    """Write an accessible horizontal bar chart with ticks and value labels."""
+    """Write an accessible horizontal bar chart with counts and percentages."""
 
     items = list(counts.items())
     if sort_by_value:
         items.sort(key=lambda item: (-item[1], item[0]))
     width = 1200
     left = 360
-    right = 90
+    right = 150 if percentage_total else 90
     top = 105
     row_height = 34
     plot_width = width - left - right
@@ -78,11 +80,14 @@ def write_bar_chart(
         y = top + index * row_height
         bar_width = plot_width * value / maximum if maximum else 0
         color = _BLUE if index % 2 == 0 else _TEAL
+        value_label = f"{value:,}"
+        if percentage_total:
+            value_label += f"  ({100 * value / percentage_total:.2f}%)"
         elements.extend(
             [
                 f'<text x="{left - 14}" y="{y + 19}" text-anchor="end" fill="{_INK}" font-size="13">{escape(label)}</text>',
                 f'<rect x="{left}" y="{y}" width="{bar_width:.1f}" height="23" rx="5" fill="{color}"/>',
-                f'<text x="{left + bar_width + 8:.1f}" y="{y + 17}" fill="{_INK}" font-size="12" font-weight="600">{value:,}</text>',
+                f'<text x="{left + bar_width + 8:.1f}" y="{y + 17}" fill="{_INK}" font-size="12" font-weight="600">{escape(value_label)}</text>',
             ]
         )
     elements.append(
@@ -93,7 +98,7 @@ def write_bar_chart(
 
 
 def write_histogram(path: Path, title: str, values: Sequence[int], bins: int = 20) -> None:
-    """Write a vertical SVG histogram with numerical axes."""
+    """Write a vertical SVG histogram with numerical axes and center markers."""
 
     width, height = 1200, 650
     left, right, top, bottom = 90, 48, 110, 100
@@ -145,58 +150,22 @@ def write_histogram(path: Path, title: str, values: Sequence[int], bins: int = 2
                 f'<text x="{x + slot_width / 2:.1f}" y="{top + plot_height + 24}" text-anchor="middle" fill="{_MUTED}" font-size="11">{label:,}</text>'
             )
 
+    center_markers = ((median(values), "Median", _TEAL), (mean(values), "Mean", _BLUE))
+    for marker_index, (value, label, color) in enumerate(center_markers):
+        x = left + plot_width * (value - minimum) / span
+        label_y = top + 17 + marker_index * 21
+        elements.extend(
+            [
+                f'<line x1="{x:.1f}" y1="{top}" x2="{x:.1f}" y2="{top + plot_height}" stroke="{color}" stroke-width="2" stroke-dasharray="7 5"/>',
+                f'<text x="{x + 7:.1f}" y="{label_y}" fill="{color}" font-size="12" font-weight="600">{label}: {value:,.0f} nt</text>',
+            ]
+        )
+
     elements.extend(
         [
             f'<text x="{left + plot_width / 2}" y="{height - 48}" text-anchor="middle" fill="{_INK}" font-size="13">CDS length (nucleotides)</text>',
             f'<text x="22" y="{top + plot_height / 2}" text-anchor="middle" fill="{_INK}" font-size="13" transform="rotate(-90 22 {top + plot_height / 2})">Number of CDS</text>',
         ]
     )
-    _footer(elements, width, height)
-    path.write_text("\n".join(elements) + "\n", encoding="utf-8")
-
-
-def write_codon_heatmap(path: Path, counts: Mapping[str, int]) -> None:
-    """Write a 16-by-4 codon-usage heatmap grouped by codon position."""
-
-    bases = "TCAG"
-    row_labels = [first + second for first in bases for second in bases]
-    total = sum(counts.values())
-    percentages = {
-        codon: (100 * count / total if total else 0) for codon, count in counts.items()
-    }
-    maximum = max(percentages.values(), default=1)
-    width, height = 820, 790
-    left, top = 150, 120
-    cell_width, cell_height = 145, 35
-    elements = _header(
-        width,
-        height,
-        "Codon usage heatmap",
-        "Percentage of complete codons; darker cells indicate greater usage",
-    )
-    for column, base in enumerate(bases):
-        x = left + column * cell_width
-        elements.append(
-            f'<text x="{x + cell_width / 2}" y="{top - 17}" text-anchor="middle" fill="{_INK}" font-size="13" font-weight="600">Third base: {base}</text>'
-        )
-    for row, prefix in enumerate(row_labels):
-        y = top + row * cell_height
-        elements.append(
-            f'<text x="{left - 18}" y="{y + 23}" text-anchor="end" fill="{_INK}" font-size="13" font-weight="600">{prefix}</text>'
-        )
-        for column, base in enumerate(bases):
-            codon = prefix + base
-            percentage = percentages.get(codon, 0)
-            intensity = percentage / maximum if maximum else 0
-            opacity = 0.12 + 0.88 * intensity
-            x = left + column * cell_width
-            text_color = "#ffffff" if intensity >= 0.55 else _INK
-            elements.extend(
-                [
-                    f'<rect x="{x + 2}" y="{y + 2}" width="{cell_width - 4}" height="{cell_height - 4}" rx="5" fill="{_BLUE}" fill-opacity="{opacity:.3f}"><title>{codon}: {percentage:.3f}%</title></rect>',
-                    f'<text x="{x + 13}" y="{y + 23}" fill="{text_color}" font-size="12" font-weight="600">{codon}</text>',
-                    f'<text x="{x + cell_width - 12}" y="{y + 23}" text-anchor="end" fill="{text_color}" font-size="11">{percentage:.2f}%</text>',
-                ]
-            )
     _footer(elements, width, height)
     path.write_text("\n".join(elements) + "\n", encoding="utf-8")

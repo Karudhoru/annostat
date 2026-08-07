@@ -7,13 +7,20 @@ import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+from collections import Counter
 from pathlib import Path
 
 from annostat.analysis import analyze_codons, analyze_features, cog_categories
 from annostat.cli import run_analysis
 from annostat.models import Feature
 from annostat.parsers import parse_attributes, parse_fasta, parse_gff
-from annostat.sequences import extract_cds_sequences, reverse_complement, translate_dna
+from annostat.report import render_html_report
+from annostat.sequences import (
+    extract_cds_sequences,
+    iter_cds_sequences,
+    reverse_complement,
+    translate_dna,
+)
 
 
 class AnnostatTests(unittest.TestCase):
@@ -64,6 +71,36 @@ class AnnostatTests(unittest.TestCase):
         self.assertEqual(codons, {"ATG": 1, "AAA": 1, "TAA": 1})
         self.assertEqual(starts, {"ATG": 1})
 
+    def test_streaming_translation_accumulates_identical_codon_statistics(self) -> None:
+        features = [
+            Feature("chr", "test", "CDS", 1, 9, None, "+", 0, {"ID": "one"}),
+            Feature("chr", "test", "CDS", 10, 18, None, "+", 0, {"ID": "two"}),
+        ]
+        genome = {"chr": "ATGAAATAAGTGCCCTAG"}
+        expected_records = extract_cds_sequences(features, genome)
+        expected_codons, expected_starts = analyze_codons(expected_records)
+        codons: Counter[str] = Counter()
+        starts: Counter[str] = Counter()
+
+        streamed_records = list(
+            iter_cds_sequences(
+                features, genome, codon_counts=codons, start_counts=starts
+            )
+        )
+
+        self.assertEqual(streamed_records, expected_records)
+        self.assertEqual(codons, expected_codons)
+        self.assertEqual(starts, expected_starts)
+
+    def test_feature_analysis_consumes_a_single_pass_iterable(self) -> None:
+        feature = Feature("chr", "test", "CDS", 1, 9, None, "+", 0, {"ID": "one"})
+        features = iter((feature,))
+
+        summary = analyze_features(features)
+
+        self.assertEqual(summary["total_features"], 1)
+        self.assertEqual(summary["cds_count"], 1)
+
     def test_end_to_end_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -77,29 +114,57 @@ class AnnostatTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            summary = run_analysis(fasta, gff, output, "tsv")
+            summary = run_analysis(fasta, gff, output, "tsv", profile=True)
 
             self.assertEqual(summary["cds_count"], 1)
             expected = {
-                "features.tsv", "cds_nucleotide.fasta", "cds_protein.fasta",
-                "codon_usage.csv", "start_codons.csv", "cog_categories.csv",
-                "summary.json", "cog_categories.svg", "cds_lengths.svg",
-                "start_codons.svg", "codon_usage.svg",
+                "report.html", "summary.json", "tables/features.tsv",
+                "tables/codon_usage.csv", "tables/start_codons.csv",
+                "tables/cog_categories.csv", "sequences/cds_nucleotide.fasta",
+                "sequences/cds_protein.fasta", "plots/cog_categories.svg",
+                "plots/cds_lengths.svg", "plots/start_codons.svg",
             }
-            self.assertEqual({path.name for path in output.iterdir()}, expected)
-            with (output / "features.tsv").open(encoding="utf-8", newline="") as handle:
+            self.assertEqual(
+                {path.relative_to(output).as_posix() for path in output.rglob("*") if path.is_file()},
+                expected,
+            )
+            with (output / "tables" / "features.tsv").open(encoding="utf-8", newline="") as handle:
                 rows = list(csv.DictReader(handle, delimiter="\t"))
             self.assertEqual(rows[0]["ID"], "cds1")
             written_summary = json.loads((output / "summary.json").read_text())
             self.assertEqual(written_summary["cds_count"], 1)
             self.assertRegex(written_summary["annostat_version"], r"^\d+\.\d+\.\d+$")
             self.assertEqual(written_summary["input_files"]["fasta"], str(fasta))
-            for plot_name in (
-                "cog_categories.svg", "cds_lengths.svg", "start_codons.svg", "codon_usage.svg"
-            ):
-                root_element = ET.parse(output / plot_name).getroot()
+            self.assertEqual(written_summary["top_codons"][0]["codon"], "ATG")
+            self.assertEqual(len(written_summary["output_files"]), 11)
+            self.assertIn("stage_seconds", written_summary["performance"])
+            self.assertGreater(written_summary["performance"]["peak_memory_bytes"], 0)
+            report = (output / "report.html").read_text(encoding="utf-8")
+            self.assertIn("Bacterial annotation report", report)
+            self.assertIn("Most-used codons", report)
+            self.assertNotIn("<script", report)
+            self.assertNotIn("https://", report)
+            self.assertEqual(report.count("<svg "), 3)
+            self.assertNotIn("Codon usage heatmap", report)
+            for plot_name in ("cog_categories.svg", "cds_lengths.svg", "start_codons.svg"):
+                root_element = ET.parse(output / "plots" / plot_name).getroot()
                 self.assertTrue(root_element.tag.endswith("svg"))
                 self.assertIsNotNone(root_element.find("{http://www.w3.org/2000/svg}title"))
+
+            written_summary["input_files"] = {
+                "fasta": "<script>alert(1)</script>.fna",
+                "gff3": "unsafe&annotation.gff3",
+            }
+            escaped_report = render_html_report(
+                written_summary,
+                [
+                    (output / "plots" / "cog_categories.svg", "COG categories"),
+                    (output / "plots" / "cds_lengths.svg", "CDS lengths"),
+                    (output / "plots" / "start_codons.svg", "Start codons"),
+                ],
+            )
+            self.assertNotIn("<script>alert(1)</script>", escaped_report)
+            self.assertIn("unsafe&amp;annotation.gff3", escaped_report)
 
     def test_parser_reports_invalid_gff(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -170,6 +235,12 @@ class AnnostatTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
+            profile_result = subprocess.run(
+                command[:-1] + [str(root / "profile-results"), "--profile"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("[1/5] Reading GFF3", result.stdout)
@@ -177,6 +248,9 @@ class AnnostatTests(unittest.TestCase):
         self.assertIn("ATG/GTG/TTG starts", result.stdout)
         self.assertEqual(quiet_result.returncode, 0, quiet_result.stderr)
         self.assertEqual(quiet_result.stdout, "")
+        self.assertEqual(profile_result.returncode, 0, profile_result.stderr)
+        self.assertIn("Performance profile", profile_result.stdout)
+        self.assertIn("Peak Python memory", profile_result.stdout)
 
 
 if __name__ == "__main__":

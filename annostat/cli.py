@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+import tracemalloc
+from collections import Counter
 from pathlib import Path
 from time import perf_counter
 from typing import Callable
@@ -15,7 +17,7 @@ if __package__ in (None, ""):
 import argparse
 
 from annostat import __version__
-from annostat.analysis import COG_CATEGORY_NAMES, analyze_codons, analyze_features
+from annostat.analysis import COG_CATEGORY_NAMES, analyze_features
 from annostat.output import (
     write_cds_fastas,
     write_codon_usage,
@@ -24,8 +26,9 @@ from annostat.output import (
     write_summary,
 )
 from annostat.parsers import parse_fasta, parse_gff
-from annostat.plots import write_bar_chart, write_codon_heatmap, write_histogram
-from annostat.sequences import extract_cds_sequences
+from annostat.plots import write_bar_chart, write_histogram
+from annostat.report import render_html_report
+from annostat.sequences import iter_cds_sequences
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,7 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
             "examples:\n"
             "  %(prog)s -f genome.fna -g annotations.gff3\n"
             "  %(prog)s -f genome.fna -g annotations.gff3 -o results --table-format tsv\n\n"
-            "The output includes summary tables, CDS FASTA files, and publication-ready SVG charts."
+            "The output includes an offline HTML report, analysis tables, CDS FASTA files, "
+            "and three publication-ready SVG charts."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -53,6 +57,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="feature overview format (default: csv)",
     )
     parser.add_argument("-q", "--quiet", action="store_true", help="suppress progress and summary output")
+    parser.add_argument(
+        "--profile", action="store_true",
+        help="measure and report peak Python memory in addition to stage timings",
+    )
     parser.add_argument("--version", action="version", version=f"annostat {__version__}")
     return parser
 
@@ -63,11 +71,17 @@ def run_analysis(
     output_dir: Path,
     table_format: str,
     progress: Callable[[str], None] | None = None,
+    profile: bool = False,
 ) -> dict[str, object]:
     """Run the complete annotation-analysis workflow."""
 
     notify = progress or (lambda message: None)
+    stage_timings: dict[str, float] = {}
+    if profile:
+        tracemalloc.start()
+
     notify("Reading GFF3 annotations and FASTA sequences")
+    stage_started = perf_counter()
     features = list(parse_gff(gff_path))
     genome = parse_fasta(fasta_path)
     circular_seqids = frozenset(
@@ -76,11 +90,38 @@ def run_analysis(
         if feature.type == "region"
         and feature.attributes.get("Is_circular", "").lower() == "true"
     )
-    notify("Extracting and translating CDS sequences")
-    records = extract_cds_sequences(features, genome, circular_seqids)
-    notify("Calculating feature, COG, and codon statistics")
+    stage_timings["input_parsing"] = perf_counter() - stage_started
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    tables_dir = output_dir / "tables"
+    sequences_dir = output_dir / "sequences"
+    plots_dir = output_dir / "plots"
+    for directory in (tables_dir, sequences_dir, plots_dir):
+        directory.mkdir(exist_ok=True)
+
+    notify("Streaming, translating, and writing CDS sequences")
+    stage_started = perf_counter()
+    codon_counts: Counter[str] = Counter()
+    start_counts: Counter[str] = Counter()
+    cds_lengths: list[int] = []
+
+    def observed_records():
+        for record in iter_cds_sequences(
+            features,
+            genome,
+            circular_seqids,
+            codon_counts=codon_counts,
+            start_counts=start_counts,
+        ):
+            cds_lengths.append(record.feature.length)
+            yield record
+
+    write_cds_fastas(sequences_dir, observed_records())
+    stage_timings["cds_processing"] = perf_counter() - stage_started
+
+    notify("Calculating statistics and writing analysis tables")
+    stage_started = perf_counter()
     summary = analyze_features(features)
-    codon_counts, start_counts = analyze_codons(records)
     summary["annostat_version"] = __version__
     summary["input_files"] = {"fasta": str(fasta_path), "gff3": str(gff_path)}
     summary["sequence_ids"] = sorted(genome)
@@ -88,46 +129,107 @@ def run_analysis(
     summary["genome_length"] = sum(map(len, genome.values()))
     summary["complete_codon_count"] = codon_counts.total()
     summary["start_codon_counts"] = dict(sorted(start_counts.items()))
+    summary["top_codons"] = [
+        {
+            "codon": codon,
+            "count": count,
+            "percentage": 100 * count / codon_counts.total() if codon_counts else 0,
+        }
+        for codon, count in codon_counts.most_common(5)
+    ]
 
-    notify("Writing tables, summaries, and FASTA files")
-    output_dir.mkdir(parents=True, exist_ok=True)
     delimiter = "," if table_format == "csv" else "\t"
-    write_overview(output_dir / f"features.{table_format}", features, delimiter)
-    write_cds_fastas(output_dir, records)
-    write_codon_usage(output_dir / "codon_usage.csv", codon_counts)
-    write_count_table(output_dir / "start_codons.csv", "start_codon", start_counts)
+    write_overview(tables_dir / f"features.{table_format}", features, delimiter)
+    write_codon_usage(tables_dir / "codon_usage.csv", codon_counts)
+    write_count_table(tables_dir / "start_codons.csv", "start_codon", start_counts)
     write_count_table(
-        output_dir / "cog_categories.csv",
+        tables_dir / "cog_categories.csv",
         "cog_category",
         summary["cog_category_counts"],
     )
-    write_summary(output_dir / "summary.json", summary)
+    stage_timings["table_generation"] = perf_counter() - stage_started
 
     notify("Rendering scientific visualizations")
+    stage_started = perf_counter()
     cog_plot_counts = {
         f"{category} - {COG_CATEGORY_NAMES.get(category, 'Unclassified')}": count
         for category, count in summary["cog_category_counts"].items()
     }
     write_bar_chart(
-        output_dir / "cog_categories.svg",
+        plots_dir / "cog_categories.svg",
         "COG category distribution",
         cog_plot_counts,
         description="Functional category assignments; multi-category proteins contribute to each category",
         axis_label="COG assignments",
+        percentage_total=sum(cog_plot_counts.values()),
     )
     write_histogram(
-        output_dir / "cds_lengths.svg",
+        plots_dir / "cds_lengths.svg",
         "CDS length distribution (nucleotides)",
-        [record.feature.length for record in records],
+        cds_lengths,
     )
+    grouped_starts = {
+        "ATG": start_counts.get("ATG", 0),
+        "GTG": start_counts.get("GTG", 0),
+        "TTG": start_counts.get("TTG", 0),
+        "Other": sum(start_counts.values())
+        - start_counts.get("ATG", 0)
+        - start_counts.get("GTG", 0)
+        - start_counts.get("TTG", 0),
+    }
     write_bar_chart(
-        output_dir / "start_codons.svg",
+        plots_dir / "start_codons.svg",
         "Start codon usage",
-        start_counts,
-        description=f"Observed first codon across {len(records):,} coding sequences",
+        grouped_starts,
+        description=f"Observed first codon across {len(cds_lengths):,} coding sequences",
         axis_label="Coding sequences",
+        sort_by_value=False,
+        percentage_total=len(cds_lengths),
     )
-    write_codon_heatmap(output_dir / "codon_usage.svg", codon_counts)
+    stage_timings["plot_generation"] = perf_counter() - stage_started
+
+    notify("Building the offline HTML report")
+    plot_paths = [
+        (plots_dir / "cog_categories.svg", "COG functional categories"),
+        (plots_dir / "cds_lengths.svg", "CDS length distribution"),
+        (plots_dir / "start_codons.svg", "Start codon usage"),
+    ]
+    summary["output_files"] = [
+        "report.html",
+        "summary.json",
+        f"tables/features.{table_format}",
+        "tables/codon_usage.csv",
+        "tables/start_codons.csv",
+        "tables/cog_categories.csv",
+        "sequences/cds_nucleotide.fasta",
+        "sequences/cds_protein.fasta",
+        "plots/cog_categories.svg",
+        "plots/cds_lengths.svg",
+        "plots/start_codons.svg",
+    ]
+    summary["performance"] = {
+        "stage_seconds": dict(stage_timings),
+        "total_seconds": sum(stage_timings.values()),
+        "peak_memory_bytes": tracemalloc.get_traced_memory()[1] if profile else None,
+    }
+    stage_started = perf_counter()
+    report_html = render_html_report(summary, plot_paths)
+    if profile:
+        summary["performance"]["peak_memory_bytes"] = tracemalloc.get_traced_memory()[1]
+        report_html = render_html_report(summary, plot_paths)
+    (output_dir / "report.html").write_text(
+        report_html, encoding="utf-8"
+    )
+    stage_timings["report_generation"] = perf_counter() - stage_started
+    peak_memory = tracemalloc.get_traced_memory()[1] if profile else None
+    if profile:
+        tracemalloc.stop()
+    summary["performance"] = {
+        "stage_seconds": dict(stage_timings),
+        "total_seconds": sum(stage_timings.values()),
+        "peak_memory_bytes": peak_memory,
+    }
+    write_summary(output_dir / "summary.json", summary)
     return summary
 
 
@@ -164,8 +266,23 @@ def _print_summary(summary: dict[str, object], output_dir: Path, elapsed: float)
         print(f"  {label:<24} {value:>28}")
     print("-" * 56)
     print(f"  Output                   {output_dir.resolve()}")
-    print(f"  Files written            {len(list(output_dir.iterdir()))}")
+    print(f"  Files written            {len(summary['output_files'])}")
     print(f"  Completed in             {elapsed:.2f} seconds")
+    performance = summary["performance"]
+    if performance.get("peak_memory_bytes"):
+        print(f"  Peak Python memory       {performance['peak_memory_bytes'] / 1024 / 1024:.2f} MiB")
+        print("\nPerformance profile")
+        print("-" * 56)
+        stage_labels = {
+            "input_parsing": "Input parsing",
+            "cds_processing": "CDS processing and FASTA",
+            "table_generation": "Analysis tables",
+            "plot_generation": "SVG plots",
+            "report_generation": "HTML report",
+        }
+        for stage, seconds in performance["stage_seconds"].items():
+            print(f"  {stage_labels.get(stage, stage):<30} {seconds:>12.4f} s")
+        print("-" * 56)
 
 
 def main(arguments: list[str] | None = None) -> int:
@@ -192,6 +309,7 @@ def main(arguments: list[str] | None = None) -> int:
             args.output,
             args.table_format,
             None if args.quiet else report_progress,
+            args.profile,
         )
     except (OSError, ValueError) as error:
         parser.error(str(error))
