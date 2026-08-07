@@ -17,6 +17,13 @@ _BLUE = "#2563eb"
 _TEAL = "#0f766e"
 
 
+def _short_label(value: object, maximum: int = 30) -> str:
+    """Shorten a visible plot label while preserving compact identifiers."""
+
+    label = str(value)
+    return label if len(label) <= maximum else label[: maximum - 1] + "…"
+
+
 def _header(width: int, height: int, title: str, description: str) -> list[str]:
     """Return the common accessible SVG header and theme."""
 
@@ -163,7 +170,8 @@ def write_histogram(path: Path, title: str, values: Sequence[int], bins: int = 2
 
     center_markers = ((median(values), "Median", _TEAL), (mean(values), "Mean", _BLUE))
     for marker_index, (value, label, color) in enumerate(center_markers):
-        x = left + plot_width * (value - minimum) / span
+        marker_span = max(1, maximum - minimum)
+        x = left + plot_width * (value - minimum) / marker_span
         label_y = top + 17 + marker_index * 21
         elements.extend(
             [
@@ -178,5 +186,173 @@ def write_histogram(path: Path, title: str, values: Sequence[int], bins: int = 2
             f'<text x="22" y="{top + plot_height / 2}" text-anchor="middle" fill="{_INK}" font-size="13" transform="rotate(-90 22 {top + plot_height / 2})">Number of CDS</text>',
         ]
     )
+    _footer(elements, width, height)
+    path.write_text("\n".join(elements) + "\n", encoding="utf-8")
+
+
+def write_comparison_overview(path: Path, profiles: Sequence[Mapping[str, object]]) -> None:
+    """Write small-multiple dot plots for comparable normalized metrics."""
+
+    metrics = (
+        ("GC content", "gc_percent", "%"),
+        ("Coding density", "coding_density_percent", "%"),
+        ("COG coverage", "cog_coverage_percent", "%"),
+        ("Hypothetical CDS", "hypothetical_percent", "%"),
+        ("Gene names", "gene_name_percent", "%"),
+        ("CDS density", "cds_per_mb", " / Mb"),
+    )
+    width, panel_width = 1200, 520
+    left, top = 160, 120
+    row_height = max(72, 18 * len(profiles) + 34)
+    height = top + len(metrics) * row_height + 80
+    elements = _header(
+        width, height, "Normalized annotation overview",
+        "Comparable percentages and rates; each row uses its own labelled scale",
+    )
+    colors = (_BLUE, _TEAL, "#7c3aed", "#c2410c", "#be123c", "#0369a1")
+    for metric_index, (label, key, suffix) in enumerate(metrics):
+        available_profiles = [
+            profile for profile in profiles
+            if key != "cog_coverage_percent" or profile.get("cog_data_available", True)
+        ]
+        values = [float(profile[key]) for profile in available_profiles]
+        maximum = max(values, default=1)
+        scale_max = 100.0 if suffix == "%" else max(1.0, maximum * 1.08)
+        y = top + metric_index * row_height
+        elements.extend(
+            [
+                f'<text x="{left - 18}" y="{y + 6}" text-anchor="end" fill="{_INK}" font-size="14" font-weight="600">{escape(label)}</text>',
+                f'<line x1="{left}" y1="{y}" x2="{left + panel_width}" y2="{y}" stroke="{_GRID}" stroke-width="2"/>',
+                f'<text x="{left}" y="{y + 27}" text-anchor="middle" fill="{_MUTED}" font-size="11">0</text>',
+                f'<text x="{left + panel_width}" y="{y + 27}" text-anchor="middle" fill="{_MUTED}" font-size="11">{scale_max:.0f}{escape(suffix)}</text>',
+            ]
+        )
+        for profile_index, profile in enumerate(profiles):
+            color = colors[profile_index % len(colors)]
+            offset = (profile_index - (len(profiles) - 1) / 2) * 18
+            full_label = str(profile["label"])
+            visible_label = _short_label(full_label)
+            if key == "cog_coverage_percent" and not profile.get("cog_data_available", True):
+                elements.append(
+                    f'<text x="{left + panel_width + 18}" y="{y + offset + 4:.1f}" fill="{_MUTED}" font-size="11"><title>{escape(full_label)}: not available</title>{escape(visible_label)}: not available</text>'
+                )
+                continue
+            value = float(profile[key])
+            x = left + panel_width * value / scale_max if scale_max else left
+            elements.extend(
+                [
+                    f'<circle cx="{x:.1f}" cy="{y + offset:.1f}" r="6" fill="{color}"><title>{escape(str(profile["label"]))}: {value:.2f}{escape(suffix)}</title></circle>',
+                    f'<text x="{left + panel_width + 18}" y="{y + offset + 4:.1f}" fill="{color}" font-size="11"><title>{escape(full_label)}: {value:.2f}{escape(suffix)}</title>{escape(visible_label)}: {value:.2f}{escape(suffix)}</text>',
+                ]
+            )
+    _footer(elements, width, height)
+    path.write_text("\n".join(elements) + "\n", encoding="utf-8")
+
+
+def write_cog_comparison(
+    path: Path,
+    profiles: Sequence[Mapping[str, object]],
+    category_names: Mapping[str, str],
+) -> None:
+    """Write a two-genome COG delta chart or a multi-genome heatmap."""
+
+    categories = sorted(
+        set().union(*(profile["cog_category_percentages"] for profile in profiles))
+    )
+    if len(profiles) == 2:
+        _write_cog_delta(path, profiles, categories, category_names)
+    else:
+        _write_cog_heatmap(path, profiles, categories, category_names)
+
+
+def _write_cog_delta(
+    path: Path,
+    profiles: Sequence[Mapping[str, object]],
+    categories: Sequence[str],
+    category_names: Mapping[str, str],
+) -> None:
+    """Write percentage-point COG differences for exactly two genomes."""
+
+    width, left, right, top, row_height = 1200, 390, 110, 110, 31
+    height = max(250, top + len(categories) * row_height + 75)
+    deltas = [
+        float(profiles[1]["cog_category_percentages"].get(category, 0))
+        - float(profiles[0]["cog_category_percentages"].get(category, 0))
+        for category in categories
+    ]
+    bound = max((abs(value) for value in deltas), default=1) or 1
+    center = left + (width - left - right) / 2
+    half_width = (width - left - right) / 2
+    description = (
+        f'Percentage-point change from {profiles[0]["label"]} to {profiles[1]["label"]}; '
+        "multi-category proteins contribute to each category"
+    )
+    elements = _header(width, height, "COG functional-profile difference", description)
+    elements.append(
+        f'<line x1="{center}" y1="{top - 12}" x2="{center}" y2="{height - 62}" stroke="{_INK}"/>'
+    )
+    for index, (category, delta) in enumerate(zip(categories, deltas)):
+        y = top + index * row_height
+        bar_width = half_width * abs(delta) / bound
+        x = center if delta >= 0 else center - bar_width
+        color = _TEAL if delta >= 0 else _BLUE
+        label = f"{category} - {category_names.get(category, 'Unclassified')}"
+        elements.extend(
+            [
+                f'<text x="{left - 12}" y="{y + 17}" text-anchor="end" fill="{_INK}" font-size="12">{escape(label)}</text>',
+                f'<rect x="{x:.1f}" y="{y}" width="{bar_width:.1f}" height="21" rx="4" fill="{color}"/>',
+                f'<text x="{center + (bar_width + 7 if delta >= 0 else -bar_width - 7):.1f}" y="{y + 16}" text-anchor="{("start" if delta >= 0 else "end")}" fill="{_INK}" font-size="11">{delta:+.2f} pp</text>',
+            ]
+        )
+    _footer(elements, width, height)
+    path.write_text("\n".join(elements) + "\n", encoding="utf-8")
+
+
+def _write_cog_heatmap(
+    path: Path,
+    profiles: Sequence[Mapping[str, object]],
+    categories: Sequence[str],
+    category_names: Mapping[str, str],
+) -> None:
+    """Write a dataset-by-category heatmap for three or more genomes."""
+
+    width, left, top, cell_width, cell_height = 1200, 390, 130, 90, 31
+    plot_width = max(1, len(profiles)) * cell_width
+    width = max(width, left + plot_width + 60)
+    height = max(270, top + len(categories) * cell_height + 75)
+    maximum = max(
+        (float(profile["cog_category_percentages"].get(category, 0)) for profile in profiles for category in categories),
+        default=1,
+    ) or 1
+    elements = _header(
+        width, height, "COG functional-profile heatmap",
+        "Percentage of all observed COG category assignments in each dataset",
+    )
+    for profile_index, profile in enumerate(profiles):
+        x = left + profile_index * cell_width + cell_width / 2
+        full_label = str(profile["label"])
+        elements.append(
+            f'<text x="{x}" y="{top - 16}" text-anchor="middle" fill="{_INK}" font-size="12"><title>{escape(full_label)}</title>{escape(_short_label(full_label, 12))}</text>'
+        )
+    for category_index, category in enumerate(categories):
+        y = top + category_index * cell_height
+        label = f"{category} - {category_names.get(category, 'Unclassified')}"
+        elements.append(
+            f'<text x="{left - 12}" y="{y + 20}" text-anchor="end" fill="{_INK}" font-size="12">{escape(label)}</text>'
+        )
+        for profile_index, profile in enumerate(profiles):
+            value = float(profile["cog_category_percentages"].get(category, 0))
+            intensity = value / maximum
+            red = round(239 - 183 * intensity)
+            green = round(246 - 57 * intensity)
+            blue = round(255 - 7 * intensity)
+            x = left + profile_index * cell_width
+            text_color = "#ffffff" if intensity > 0.55 else _INK
+            elements.extend(
+                [
+                    f'<rect x="{x}" y="{y}" width="{cell_width - 3}" height="{cell_height - 3}" rx="4" fill="rgb({red},{green},{blue})"><title>{escape(str(profile["label"]))}: {value:.2f}%</title></rect>',
+                    f'<text x="{x + (cell_width - 3) / 2:.1f}" y="{y + 20}" text-anchor="middle" fill="{text_color}" font-size="11">{value:.2f}%</text>',
+                ]
+            )
     _footer(elements, width, height)
     path.write_text("\n".join(elements) + "\n", encoding="utf-8")

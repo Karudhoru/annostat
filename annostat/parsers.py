@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from math import isfinite
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -65,6 +66,10 @@ def parse_gff(path: str | Path) -> Iterator[Feature]:
                 seqid, source, feature_type, start_text, end_text, score_text,
                 strand, phase_text, attribute_text,
             ) = fields
+            if not seqid or not feature_type:
+                raise ValueError(
+                    f"{path}:{line_number}: seqid and feature type must not be empty"
+                )
             try:
                 start = int(start_text)
                 end = int(end_text)
@@ -86,6 +91,8 @@ def parse_gff(path: str | Path) -> Iterator[Feature]:
                 raise ValueError(
                     f"{path}:{line_number}: invalid score or phase"
                 ) from error
+            if score is not None and not isfinite(score):
+                raise ValueError(f"{path}:{line_number}: score must be finite or .")
             if phase not in {None, 0, 1, 2}:
                 raise ValueError(f"{path}:{line_number}: phase must be 0, 1, 2, or .")
 

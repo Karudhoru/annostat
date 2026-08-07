@@ -61,11 +61,16 @@ def render_html_report(
         f'<li><strong>{escape(item["codon"])}</strong><span>{item["count"]:,} ({item["percentage"]:.2f}%)</span></li>'
         for item in summary["top_codons"]
     )
+    cog_coverage = (
+        _metric("COG coverage", _percentage(cog_annotated, cds_count), f'{cog_annotated:,} annotated CDS')
+        if summary["cog_data_available"]
+        else _metric("COG coverage", "Not available", "source contains no COG categories")
+    )
     metrics = "".join(
         (
             _metric("Genome size", f'{int(summary["genome_length"]):,} bp', f'{len(summary["sequence_ids"]):,} sequence records'),
             _metric("Features", f'{int(summary["total_features"]):,}', f'{cds_count:,} coding sequences'),
-            _metric("COG coverage", _percentage(cog_annotated, cds_count), f'{cog_annotated:,} annotated CDS'),
+            cog_coverage,
             _metric("Recognized starts", _percentage(standard_starts, cds_count), f'{standard_starts:,} ATG/GTG/TTG'),
             _metric("Genome GC", f'{quality["genome_gc_percent"]:.2f}%', "whole-genome composition"),
             _metric("Coding density", f'{quality["coding_density_percent"]:.2f}%', "non-duplicated CDS coverage"),

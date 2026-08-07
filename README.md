@@ -16,13 +16,32 @@ It uses only the Python standard library and supports multi-record FASTA files.
   hypothetical-protein status without changing the complete analysis
 - Builds a self-contained offline HTML report with provenance and performance timings
 - Saves three focused, dependency-free SVG charts for COG categories, CDS lengths,
-  and start codons
+  and start codons; the COG chart is omitted when the source has no COG data
 - Streams CDS processing and FASTA generation to reduce runtime and peak memory
+- Compares two or more local or NCBI-hosted annotations using normalized genome,
+  annotation-completeness, COG, start-codon, and QC profiles
+- Reports pairwise Jensen-Shannon profile distances and exact gene-symbol/COG-ID
+  overlap without presenting annotation labels as inferred orthologs
+- Downloads versioned RefSeq or GenBank assemblies through the official NCBI
+  Datasets command-line tool when network connectivity is requested
 
 ## Requirements
 
 - Python 3.10 or newer
 - Matching sequence identifiers in the GFF3 and FASTA inputs
+
+## Input assumptions and scope
+
+- GFF3 records must contain nine tab-separated fields with 1-based inclusive
+  coordinates. The FASTA identifier is the first whitespace-delimited header token.
+- CDS strand and phase are honored. Circular-origin CDS coordinates extending past
+  the sequence length are supported when a `region` feature declares
+  `Is_circular=true`.
+- A CDS split across multiple GFF3 rows is currently analyzed as multiple rows; this
+  is appropriate for the supplied bacterial annotations but should be considered
+  before using eukaryotic or heavily fragmented gene models.
+- COG coverage describes categories actually present in the annotation source. An
+  annotation with no COG category fields is reported as unavailable, not as 0%.
 
 ## Installation
 
@@ -42,6 +61,22 @@ environment, use:
 
 ```bash
 python -m pip install .
+```
+
+## Testing
+
+Run the complete standard-library test suite from the repository root with the
+same interpreter used to install AnnStat:
+
+```bash
+python -m compileall -q annostat tests
+python -m unittest discover -v
+```
+
+Then run one supplied dataset end to end and open `results/report.html` locally:
+
+```bash
+annostat -f data/GCF_000007145.1.fna -g data/GCF_000007145.1.gff3 -o results --table-format tsv
 ```
 
 ## Usage
@@ -76,6 +111,91 @@ annostat \
 Available criteria are `--min-cds-length`, `--max-cds-length`, `--require-cog`,
 and `--exclude-hypothetical`.
 
+### Comparative analysis
+
+Compare two or more labelled local genomes with repeatable `--genome` options:
+
+```bash
+annostat compare \
+  --genome genome-a data/GCF_000007145.1.fna data/GCF_000007145.1.gff3 \
+  --genome genome-b data/GCF_001050915.2.fna data/GCF_001050915.2.gff3 \
+  --output comparison
+```
+
+The comparison package is intentionally compact:
+
+```text
+comparison/
+|-- comparison.html
+|-- comparison.json
+|-- tables/
+|   |-- dataset_metrics.tsv
+|   `-- pairwise_comparisons.tsv
+`-- plots/
+    |-- dataset_overview.svg
+    `-- cog_comparison.svg (only when every input supplies COG categories)
+```
+
+`dataset_metrics.tsv` provides raw genome/feature counts together with GC,
+coding density, CDS per Mb, annotation coverage, start-codon usage, and QC
+warnings. `pairwise_comparisons.tsv` contains metric deltas, percentage deltas,
+Jensen-Shannon distances for COG and start-codon profiles, and Jaccard overlap
+for exact gene symbols and explicit COG identifiers.
+
+For two datasets, the COG figure shows percentage-point differences. For three
+or more datasets, it becomes a dataset-by-category heatmap. Exact gene-symbol
+overlap describes annotation labels only; it is not orthology, ANI, phylogeny,
+or a core/accessory pangenome analysis.
+
+### Compare against external NCBI data
+
+NCBI access is optional and uses NCBI's maintained `datasets` executable. Follow
+the official [installation instructions](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/command-line-tools/download-and-install/),
+then add an external reference directly to a local comparison:
+
+```bash
+annostat compare \
+  --genome local-sample sample.fna sample.gff3 \
+  --reference GCF_000007145.1 \
+  --output comparison
+```
+
+`--reference` is repeatable, so a comparison may contain only external
+assemblies or any mixture of local and NCBI inputs. AnnStat downloads genome
+FASTA, GFF3, and assembly metadata under `comparison/external_inputs/`, then
+runs every input through the same comparison engine:
+
+```bash
+annostat compare \
+  --reference GCF_000007145.1 \
+  --reference GCF_001050915.2 \
+  --output comparison
+```
+
+The report identifies organisms and whether each pair belongs to the same or
+different species when the input metadata makes that determination possible.
+It never assumes that labelled datasets are strains. NCBI assembly names,
+taxonomy identifiers, annotation providers, and release metadata are retained
+in `comparison.json`. Versioned GCF/GCA accessions in the HTML provenance table
+link to their NCBI Datasets assembly pages.
+
+COG results are source-dependent. Bakta annotations commonly include COG
+categories, while current NCBI RefSeq GFF3 packages may not. When a source does
+not supply COG fields, AnnStat reports COG coverage and pairwise COG statistics
+as `Not available` and omits the COG comparison plot; missing data is never
+presented as biological zero coverage.
+
+For users who only need the source files, the standalone downloader remains
+available:
+
+```bash
+annostat fetch GCF_000007145.1 GCF_001050915.2 --output ncbi_data
+```
+
+The `NCBI_API_KEY` environment variable is honored by the official client. Local
+analysis never requires a network connection, and AnnStat does not transmit
+local FASTA or GFF3 files.
+
 The output directory contains:
 
 ```text
@@ -92,7 +212,7 @@ results/
 │   ├── cds_nucleotide.fasta
 │   └── cds_protein.fasta
 └── plots/
-    ├── cog_categories.svg
+    ├── cog_categories.svg (when COG categories are available)
     ├── cds_lengths.svg
     └── start_codons.svg
 ```
@@ -124,7 +244,7 @@ annostat \
 Example output:
 
 ```text
-annostat 0.4.0 | bacterial genome annotation analysis
+annostat 0.5.0 | bacterial genome annotation analysis
 FASTA: /path/to/annostat/data/GCF_000007145.1.fna
 GFF3:  /path/to/annostat/data/GCF_000007145.1.gff3
 
@@ -172,3 +292,10 @@ an annotation-analysis tool rather than a replacement for comprehensive
 annotation pipelines such as
 [Bakta](https://pmc.ncbi.nlm.nih.gov/articles/PMC8743544/) or
 [Prokka](https://pubmed.ncbi.nlm.nih.gov/24642063/).
+
+Comparative profiles are normalized to avoid treating larger genomes as
+automatically enriched. Full ortholog and pangenome inference remains the domain
+of tools such as [Panaroo](https://pmc.ncbi.nlm.nih.gov/articles/PMC7376924/),
+while sequence-level average nucleotide identity should be calculated by a
+specialized implementation such as
+[FastANI](https://pmc.ncbi.nlm.nih.gov/articles/PMC6269478/).

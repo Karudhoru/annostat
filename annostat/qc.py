@@ -88,7 +88,23 @@ def _finding_for_feature(
     )
 
 
-def _overlap_findings(cds_features: Iterable[Feature]) -> list[AnnotationIssue]:
+def _circular_intervals(feature: Feature, sequence_length: int) -> list[tuple[int, int]]:
+    """Represent one circular feature as one or two normalized intervals."""
+
+    if feature.length >= sequence_length:
+        return [(1, sequence_length)]
+    start = (feature.start - 1) % sequence_length + 1
+    end = start + feature.length - 1
+    if end <= sequence_length:
+        return [(start, end)]
+    return [(start, sequence_length), (1, end - sequence_length)]
+
+
+def _overlap_findings(
+    cds_features: Iterable[Feature],
+    genome: Mapping[str, str] | None = None,
+    circular_seqids: frozenset[str] = frozenset(),
+) -> list[AnnotationIssue]:
     """Find overlapping and fully contained CDS pairs with a sweep-line pass."""
 
     by_sequence: dict[str, list[Feature]] = defaultdict(list)
@@ -96,7 +112,41 @@ def _overlap_findings(cds_features: Iterable[Feature]) -> list[AnnotationIssue]:
         by_sequence[feature.seqid].append(feature)
 
     findings: list[AnnotationIssue] = []
-    for sequence_features in by_sequence.values():
+    for seqid, sequence_features in by_sequence.items():
+        if genome is not None and seqid in circular_seqids and seqid in genome:
+            sequence_length = len(genome[seqid])
+            ordered = sorted(sequence_features, key=lambda item: (item.start, item.end, item.id))
+            segments = sorted(
+                (start, end, index)
+                for index, feature in enumerate(ordered)
+                for start, end in _circular_intervals(feature, sequence_length)
+            )
+            active_segments: list[tuple[int, int, int]] = []
+            overlap_by_pair: Counter[tuple[int, int]] = Counter()
+            for start, end, index in segments:
+                active_segments = [segment for segment in active_segments if segment[1] >= start]
+                for _, other_end, other_index in active_segments:
+                    if index == other_index or ordered[index].id == ordered[other_index].id:
+                        continue
+                    pair = tuple(sorted((index, other_index)))
+                    overlap_by_pair[pair] += min(end, other_end) - start + 1
+                active_segments.append((start, end, index))
+            for (left_index, right_index), overlap_bases in sorted(overlap_by_pair.items()):
+                other, current = ordered[left_index], ordered[right_index]
+                contained = overlap_bases >= min(
+                    current.length, other.length, sequence_length
+                )
+                relation = "same strand" if other.strand == current.strand else "opposite strands"
+                findings.append(
+                    _finding_for_feature(
+                        "contained_cds" if contained else "cds_overlap",
+                        "warning" if contained else "info",
+                        current,
+                        f"{overlap_bases} bp overlap on {relation}",
+                        related_feature_id=other.id,
+                    )
+                )
+            continue
         active: list[Feature] = []
         for current in sorted(sequence_features, key=lambda item: (item.start, item.end, item.id)):
             active = [other for other in active if other.end >= current.start]
@@ -207,7 +257,11 @@ def _structural_rna_findings(features: Iterable[Feature]) -> list[AnnotationIssu
     return findings
 
 
-def feature_quality_findings(features: Iterable[Feature]) -> list[AnnotationIssue]:
+def feature_quality_findings(
+    features: Iterable[Feature],
+    genome: Mapping[str, str] | None = None,
+    circular_seqids: frozenset[str] = frozenset(),
+) -> list[AnnotationIssue]:
     """Return coordinate, pseudogene, partial, adjacency, and RNA findings."""
 
     feature_list = list(features)
@@ -232,7 +286,7 @@ def feature_quality_findings(features: Iterable[Feature]) -> list[AnnotationIssu
                     "feature has an incomplete boundary annotation",
                 )
             )
-    findings.extend(_overlap_findings(cds_features))
+    findings.extend(_overlap_findings(cds_features, genome, circular_seqids))
     findings.extend(_adjacent_duplicate_findings(cds_features))
     findings.extend(_structural_rna_findings(feature_list))
     return findings
@@ -286,11 +340,12 @@ def _covered_bases(
         if feature.type != "CDS" or feature.seqid not in genome:
             continue
         sequence_length = len(genome[feature.seqid])
-        if feature.end <= sequence_length:
+        if feature.seqid in circular_seqids:
+            intervals[feature.seqid].extend(
+                _circular_intervals(feature, sequence_length)
+            )
+        elif feature.end <= sequence_length:
             intervals[feature.seqid].append((feature.start, feature.end))
-        elif feature.seqid in circular_seqids:
-            intervals[feature.seqid].append((feature.start, sequence_length))
-            intervals[feature.seqid].append((1, ((feature.end - 1) % sequence_length) + 1))
 
     covered = 0
     for sequence_intervals in intervals.values():
