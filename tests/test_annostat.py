@@ -575,7 +575,7 @@ class AnnostatTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertRegex(result.stdout, r"^annostat \d+\.\d+\.\d+")
+        self.assertRegex(result.stdout, r"^Annostat \d+\.\d+\.\d+")
 
     def test_cli_rejects_an_inverted_cds_length_range(self) -> None:
         cli_path = Path(__file__).parents[1] / "annostat" / "cli.py"

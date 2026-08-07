@@ -99,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="exclude CDS features annotated as hypothetical proteins",
     )
-    parser.add_argument("--version", action="version", version=f"annostat {__version__}")
+    parser.add_argument("--version", action="version", version=f"Annostat {__version__}")
     return parser
 
 
@@ -473,7 +473,7 @@ def main(arguments: list[str] | None = None) -> int:
     )
     started = perf_counter()
     if not args.quiet:
-        print(f"annostat {__version__} | bacterial genome annotation analysis")
+        print(f"Annostat {__version__} | bacterial genome annotation analysis")
         print(f"FASTA: {args.fasta.resolve()}")
         print(f"GFF3:  {args.gff.resolve()}\n")
     step = 0
@@ -525,7 +525,7 @@ def _main_compare(arguments: list[str]) -> int:
                 for item in fetched
             )
         if not args.quiet:
-            print(f"annostat {__version__} | comparative annotation analysis")
+            print(f"Annostat {__version__} | comparative annotation analysis")
             for dataset in datasets:
                 print(f"  {dataset.label}: {dataset.fasta} + {dataset.gff}")
             print()

@@ -1,11 +1,20 @@
 # Changelog
 
-All notable changes to `annostat` are documented in this file.
+All notable changes to Annostat are documented in this file. The Python package
+and command-line executable retain the lowercase technical name `annostat`.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Changed
+
+- Standardized the user-facing product name as **Annostat** across terminal
+  banners, HTML reports, SVG figures, and documentation while retaining the
+  lowercase `annostat` command and Python package.
+- Reorganized the README with required versus optional components, explicit
+  assignment deliverables, and a step-by-step installation and usage guide.
 
 ### Fixed
 
@@ -70,7 +79,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Gene-symbol overlap is explicitly reported as annotation-label similarity,
   not orthology or core/accessory genome inference.
-- AnnStat does not implement approximate ANI, phylogeny, or homolog clustering;
+- Annostat does not implement approximate ANI, phylogeny, or homolog clustering;
   those analyses remain delegated to specialized tools.
 
 ## [0.4.0] - 2026-08-07

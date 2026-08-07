@@ -109,7 +109,7 @@ def render_html_report(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>annostat bacterial annotation report</title>
+<title>Annostat bacterial annotation report</title>
 <style>
 :root{{--ink:#17231e;--muted:#66756d;--line:#dce6e0;--paper:#fff;--background:#f3f7f5;--green:#087f5b;--green-soft:#dff5ec}}
 *{{box-sizing:border-box}} body{{margin:0;background:var(--background);color:var(--ink);font-family:Inter,Segoe UI,Arial,sans-serif;line-height:1.5}}
@@ -127,7 +127,7 @@ table{{width:100%;border-collapse:collapse}} td{{border-bottom:1px solid var(--l
 </style>
 </head>
 <body>
-<header><strong>annostat</strong><span>version {escape(str(summary["annostat_version"]))}</span></header>
+<header><strong>Annostat</strong><span>version {escape(str(summary["annostat_version"]))}</span></header>
 <main>
 <h1>Bacterial annotation report</h1>
 <p class="subtitle">{escape(Path(input_files["gff3"]).name)} analyzed against {escape(Path(input_files["fasta"]).name)}</p>
@@ -155,7 +155,7 @@ table{{width:100%;border-collapse:collapse}} td{{border-bottom:1px solid var(--l
 </section>
 {filter_panel}
 <section class="panel"><h2>Generated data files</h2><ul class="files">{file_links}</ul></section>
-<footer>Generated locally by annostat {escape(str(summary["annostat_version"]))}. The report contains no external scripts, fonts, or network resources.</footer>
+<footer>Generated locally by Annostat {escape(str(summary["annostat_version"]))}. The report contains no external scripts, fonts, or network resources.</footer>
 </main>
 </body>
 </html>

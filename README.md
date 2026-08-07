@@ -1,7 +1,9 @@
-# annostat
+# Annostat
 
-`annostat` analyzes bacterial genome annotations from matching GFF3 and FASTA files.
-It uses only the Python standard library and supports multi-record FASTA files.
+**Annostat** analyzes bacterial genome annotations from matching GFF3 and FASTA
+files. The project and reports use the name **Annostat**; the installable command
+and Python package remain lowercase as `annostat`. Local analysis uses only the
+Python standard library and supports multi-record FASTA files.
 
 ## Features
 
@@ -25,10 +27,38 @@ It uses only the Python standard library and supports multi-record FASTA files.
 - Downloads versioned RefSeq or GenBank assemblies through the official NCBI
   Datasets command-line tool when network connectivity is requested
 
-## Requirements
+## Required and optional components
 
-- Python 3.10 or newer
-- Matching sequence identifiers in the GFF3 and FASTA inputs
+| Component | Status | Purpose |
+|---|---|---|
+| Python 3.10 or newer | Required | Runs Annostat and its test suite |
+| Genome FASTA (`.fna`, `.fa`, or `.fasta`) | Required | Supplies the genome sequences |
+| Matching GFF3 annotation (`.gff` or `.gff3`) | Required | Supplies feature coordinates and annotations |
+| Matching FASTA/GFF3 sequence identifiers | Required | Connects every annotated feature to its sequence |
+| NCBI Datasets CLI | Optional | Downloads GCF/GCA assemblies for `fetch` or `compare --reference` |
+| Internet connection | Optional | Needed only when downloading NCBI data |
+
+No third-party Python package is required for local analysis, report generation,
+tables, FASTA exports, or SVG plots.
+
+## Assignment-required functionality
+
+Annostat implements the required deliverables from the exercise specification:
+
+- Counts CDS, RNA features by type, hypothetical CDS, CDS with gene names, CDS
+  with COG categories, and other feature types.
+- Writes a CSV or TSV feature overview containing ID, type, start, stop, gene,
+  product, and strand, with missing values left empty.
+- Exports all CDS as nucleotide and translated amino-acid multi-FASTA files.
+- Calculates pooled codon usage percentages, start-codon counts, and detailed
+  COG-category statistics, including multi-category assignments.
+- Generates at least two meaningful scientific plots; a normal run produces CDS
+  length, start-codon, and—when available—COG-category SVG figures.
+- Provides an `argparse` command-line interface and modular Python structure with
+  documented functions, classes, and methods.
+
+Filtering, quality control, HTML reports, performance profiling, comparative
+analysis, and NCBI connectivity are additional features beyond the core requirements.
 
 ## Input assumptions and scope
 
@@ -45,7 +75,7 @@ It uses only the Python standard library and supports multi-record FASTA files.
 
 ## Installation
 
-For development, install annostat in editable mode from the repository root:
+For development, install Annostat in editable mode from the repository root:
 
 ```bash
 python -m pip install -e .
@@ -63,32 +93,88 @@ environment, use:
 python -m pip install .
 ```
 
-## Testing
+## Step-by-step guide
 
-Run the complete standard-library test suite from the repository root with the
-same interpreter used to install AnnStat:
+### 1. Open the repository
 
-```bash
-python -m compileall -q annostat tests
-python -m unittest discover -v
-```
-
-Then run one supplied dataset end to end and open `results/report.html` locally:
+Run all setup commands from the directory containing `pyproject.toml`:
 
 ```bash
-annostat -f data/GCF_000007145.1.fna -g data/GCF_000007145.1.gff3 -o results --table-format tsv
+cd /path/to/exam_3
 ```
 
-## Usage
+### 2. Select one Python installation
 
-After installation, run annostat from any directory:
+Use the same interpreter for installation, testing, and execution. On Linux or
+WSL this is commonly `python3`; on Windows it may be `python` or `py -3`:
+
+```bash
+python3 --version
+```
+
+The reported version must be Python 3.10 or newer.
+
+### 3. Create and activate a virtual environment
+
+Linux or WSL:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Windows PowerShell:
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+### 4. Install Annostat
+
+Editable installation is recommended while developing:
+
+```bash
+python -m pip install -e .
+annostat --version
+annostat --help
+```
+
+The expected version banner begins with `Annostat`. If the `annostat` command is
+not found, use `python -m annostat` with the same arguments.
+
+### 5. Check the inputs
+
+Confirm that you have one genome FASTA and its matching GFF3 annotation. Sequence
+IDs must agree—for example, a FASTA record named `chromosome` must be referenced
+as `chromosome` in the first GFF3 column.
+
+### 6. Run a complete single-genome analysis
 
 ```bash
 annostat -f data/GCF_000007145.1.fna -g data/GCF_000007145.1.gff3 -o results
 ```
 
+Here `-f` selects the required FASTA, `-g` selects the required GFF3, and `-o`
+chooses the output directory. Add `--table-format tsv` when a TSV overview is
+preferred over CSV.
+
+### 7. Inspect the results
+
+Open `results/report.html` in a browser first. Then use:
+
+- `summary.json` for the complete machine-readable summary;
+- `tables/` for feature, codon, COG, start-codon, and QC data;
+- `sequences/` for nucleotide and protein CDS FASTA files; and
+- `plots/` for editable SVG figures.
+
+### 8. Use optional features
+
+The following sections show filtered exports, comparative analysis, NCBI
+references, performance profiling, and complete output descriptions.
+
 Without installing, module execution remains available from the repository root:
-`python3 -m annostat --help`.
+`python -m annostat --help`.
 
 Use `--table-format tsv` for a tab-separated feature overview. Add `--profile`
 to measure peak Python memory and print per-stage timings.
@@ -161,7 +247,7 @@ annostat compare \
 ```
 
 `--reference` is repeatable, so a comparison may contain only external
-assemblies or any mixture of local and NCBI inputs. AnnStat downloads genome
+assemblies or any mixture of local and NCBI inputs. Annostat downloads genome
 FASTA, GFF3, and assembly metadata under `comparison/external_inputs/`, then
 runs every input through the same comparison engine:
 
@@ -181,7 +267,7 @@ link to their NCBI Datasets assembly pages.
 
 COG results are source-dependent. Bakta annotations commonly include COG
 categories, while current NCBI RefSeq GFF3 packages may not. When a source does
-not supply COG fields, AnnStat reports COG coverage and pairwise COG statistics
+not supply COG fields, Annostat reports COG coverage and pairwise COG statistics
 as `Not available` and omits the COG comparison plot; missing data is never
 presented as biological zero coverage.
 
@@ -193,7 +279,7 @@ annostat fetch GCF_000007145.1 GCF_001050915.2 --output ncbi_data
 ```
 
 The `NCBI_API_KEY` environment variable is honored by the official client. Local
-analysis never requires a network connection, and AnnStat does not transmit
+analysis never requires a network connection, and Annostat does not transmit
 local FASTA or GFF3 files.
 
 The output directory contains:
@@ -231,6 +317,28 @@ overlaps and adjacent duplicate labels are informational. Containment, incomplet
 frames, missing structural RNA classes, internal stops, and ambiguous bases are
 reported as warnings that merit inspection in their biological context.
 
+## Testing and verification
+
+Run compilation and all automated tests with the interpreter used to install
+Annostat:
+
+```bash
+python -m compileall -q annostat tests
+python -m unittest discover -v
+```
+
+For a final end-to-end check, analyze one supplied genome and confirm that
+`results/report.html`, `results/summary.json`, the tables, FASTA exports, and SVG
+plots are created:
+
+```bash
+annostat \
+  -f data/GCF_000007145.1.fna \
+  -g data/GCF_000007145.1.gff3 \
+  -o results \
+  --table-format tsv
+```
+
 ## Example run
 
 ```bash
@@ -244,7 +352,7 @@ annostat \
 Example output:
 
 ```text
-annostat 0.5.0 | bacterial genome annotation analysis
+Annostat 0.5.0 | bacterial genome annotation analysis
 FASTA: /path/to/annostat/data/GCF_000007145.1.fna
 GFF3:  /path/to/annostat/data/GCF_000007145.1.gff3
 
