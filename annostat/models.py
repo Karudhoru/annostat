@@ -7,7 +7,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class Feature:
-    """One feature line from a GFF3 file."""
+    """Represent one parsed feature line from a GFF3 annotation.
+
+    Coordinates remain 1-based and inclusive, matching the GFF3 file. Optional
+    score and phase values are represented by ``None`` when the source uses ``.``.
+    """
 
     seqid: str
     source: str
@@ -36,7 +40,12 @@ class Feature:
 
 @dataclass(frozen=True, slots=True)
 class CdsSequence:
-    """Nucleotide and translated sequence for one CDS feature."""
+    """Store the sequence forms derived from one CDS feature.
+
+    ``nucleotide`` contains the complete strand-oriented feature sequence,
+    whereas ``coding_nucleotide`` has the GFF3 phase removed and is the sequence
+    used to produce ``protein``.
+    """
 
     feature: Feature
     nucleotide: str

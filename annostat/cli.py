@@ -73,7 +73,12 @@ def run_analysis(
     progress: Callable[[str], None] | None = None,
     profile: bool = False,
 ) -> dict[str, object]:
-    """Run the complete annotation-analysis workflow."""
+    """Run the complete annotation-analysis workflow and return its summary.
+
+    The workflow parses both inputs, streams CDS extraction into FASTA output,
+    calculates annotation statistics, writes tables and plots, and finally builds
+    the offline HTML report. Optional callbacks receive the five stage messages.
+    """
 
     notify = progress or (lambda message: None)
     stage_timings: dict[str, float] = {}
@@ -106,6 +111,9 @@ def run_analysis(
     cds_lengths: list[int] = []
 
     def observed_records():
+        """Yield CDS records while collecting lengths for the histogram."""
+
+        # FASTA writing consumes this generator, fusing extraction and export.
         for record in iter_cds_sequences(
             features,
             genome,
@@ -177,6 +185,7 @@ def run_analysis(
         - start_counts.get("GTG", 0)
         - start_counts.get("TTG", 0),
     }
+    # The chart stays readable while the CSV retains every observed start codon.
     write_bar_chart(
         plots_dir / "start_codons.svg",
         "Start codon usage",
@@ -234,6 +243,8 @@ def run_analysis(
 
 
 def _percentage(part: int, whole: int) -> str:
+    """Format a part-to-whole ratio as a percentage, including zero totals."""
+
     return f"{100 * part / whole:.2f}%" if whole else "0.00%"
 
 
@@ -298,6 +309,8 @@ def main(arguments: list[str] | None = None) -> int:
     step = 0
 
     def report_progress(message: str) -> None:
+        """Print one numbered workflow-stage notification."""
+
         nonlocal step
         step += 1
         print(f"[{step}/5] {message}")

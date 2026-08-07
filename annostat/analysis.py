@@ -39,18 +39,28 @@ COG_CATEGORY_NAMES = {
 
 
 def cog_categories(feature: Feature) -> tuple[str, ...]:
-    """Extract individual COG category letters from a Dbxref attribute."""
+    """Return individual COG category letters from a feature's ``Dbxref``.
+
+    A multi-category value such as ``COG:OE`` produces ``("O", "E")`` so each
+    functional assignment contributes independently to the category totals.
+    """
 
     categories: list[str] = []
     for cross_reference in feature.attributes.get("Dbxref", "").split(","):
         namespace, separator, value = cross_reference.partition(":")
         if separator and namespace == "COG" and value.isalpha() and value.isupper():
+            # COG category strings contain one uppercase letter per assignment.
             categories.extend(value)
     return tuple(categories)
 
 
 def analyze_features(features: Iterable[Feature]) -> dict[str, object]:
-    """Calculate required GFF3 feature and annotation metrics."""
+    """Calculate feature, RNA, annotation, and COG metrics in one pass.
+
+    Counts that apply specifically to coding sequences are updated only for
+    features whose GFF3 type is ``CDS``. The returned mapping is JSON-safe and
+    can therefore be written directly into the analysis summary.
+    """
 
     total_features = 0
     cds_count = 0
@@ -89,7 +99,11 @@ def analyze_features(features: Iterable[Feature]) -> dict[str, object]:
 
 
 def analyze_codons(records: Iterable[CdsSequence]) -> tuple[Counter[str], Counter[str]]:
-    """Count all complete codons and the first codon of each CDS."""
+    """Count pooled complete codons and observed start codons across CDS records.
+
+    Incomplete trailing bases are excluded because they do not form a codon.
+    The result is a pair containing all-codon counts followed by start counts.
+    """
 
     codons: Counter[str] = Counter()
     starts: Counter[str] = Counter()

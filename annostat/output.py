@@ -13,7 +13,11 @@ from annostat.models import CdsSequence, Feature
 
 
 def write_overview(path: Path, features: Iterable[Feature], delimiter: str) -> None:
-    """Write the requested compact feature overview."""
+    """Write the assignment's compact CSV or TSV feature overview.
+
+    Missing ID, gene, and product attributes are deliberately written as empty
+    fields instead of placeholder text.
+    """
 
     fieldnames = [
         "ID", "Feature type", "Start position", "Stop position",
@@ -37,6 +41,8 @@ def write_overview(path: Path, features: Iterable[Feature], delimiter: str) -> N
 
 
 def _write_fasta_record(handle: TextIO, header: str, sequence: str) -> None:
+    """Write one FASTA record with sequence lines wrapped at 60 characters."""
+
     wrapped_sequence = "\n".join(
         sequence[offset : offset + 60] for offset in range(0, len(sequence), 60)
     )
@@ -44,7 +50,7 @@ def _write_fasta_record(handle: TextIO, header: str, sequence: str) -> None:
 
 
 def write_cds_fastas(output_dir: Path, records: Iterable[CdsSequence]) -> None:
-    """Write nucleotide and amino-acid multi-FASTA files."""
+    """Write paired nucleotide and amino-acid multi-FASTA files in one pass."""
 
     with (
         (output_dir / "cds_nucleotide.fasta").open("w", encoding="utf-8") as nucleotide_file,
@@ -58,7 +64,7 @@ def write_cds_fastas(output_dir: Path, records: Iterable[CdsSequence]) -> None:
 
 
 def write_count_table(path: Path, heading: str, counts: Mapping[str, int]) -> None:
-    """Write a two-column CSV count table."""
+    """Write sorted labels and integer counts as a two-column CSV table."""
 
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
@@ -79,6 +85,6 @@ def write_codon_usage(path: Path, counts: Counter[str]) -> None:
 
 
 def write_summary(path: Path, summary: Mapping[str, object]) -> None:
-    """Write a machine-readable summary."""
+    """Serialize the complete analysis summary as indented JSON."""
 
     path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")

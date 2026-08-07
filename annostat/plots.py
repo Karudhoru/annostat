@@ -32,6 +32,8 @@ def _header(width: int, height: int, title: str, description: str) -> list[str]:
 
 
 def _footer(elements: list[str], width: int, height: int) -> None:
+    """Append the shared footer and closing tag to an SVG element list."""
+
     elements.extend(
         [
             f'<line x1="48" y1="{height - 34}" x2="{width - 48}" y2="{height - 34}" stroke="{_GRID}"/>',
@@ -51,7 +53,12 @@ def write_bar_chart(
     sort_by_value: bool = True,
     percentage_total: int | None = None,
 ) -> None:
-    """Write an accessible horizontal bar chart with counts and percentages."""
+    """Write an accessible horizontal SVG bar chart.
+
+    Bars may be ordered by value or retain insertion order. When
+    ``percentage_total`` is provided, each value label also includes its share of
+    that total.
+    """
 
     items = list(counts.items())
     if sort_by_value:
@@ -98,7 +105,11 @@ def write_bar_chart(
 
 
 def write_histogram(path: Path, title: str, values: Sequence[int], bins: int = 20) -> None:
-    """Write a vertical SVG histogram with numerical axes and center markers."""
+    """Write a CDS-length SVG histogram with mean and median markers.
+
+    The requested bin count is treated as an upper target; integer-width bins are
+    calculated from the observed range so every input length belongs to one bin.
+    """
 
     width, height = 1200, 650
     left, right, top, bottom = 90, 48, 110, 100

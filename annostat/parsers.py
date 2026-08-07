@@ -10,7 +10,12 @@ from annostat.models import Feature
 
 
 def parse_attributes(text: str) -> dict[str, str]:
-    """Parse the semicolon-separated ninth GFF3 column."""
+    """Parse the semicolon-separated ninth GFF3 column into a mapping.
+
+    Percent-encoded keys and values are decoded according to GFF3 conventions.
+    Repeated keys are retained as one comma-separated value rather than silently
+    discarding earlier data.
+    """
 
     attributes: dict[str, str] = {}
     if text == ".":
@@ -26,6 +31,7 @@ def parse_attributes(text: str) -> dict[str, str]:
         key = unquote(key)
         value = unquote(value)
         if key in attributes:
+            # Preserve repeated attributes using GFF3's list separator.
             attributes[key] = f"{attributes[key]},{value}"
         else:
             attributes[key] = value
@@ -33,12 +39,18 @@ def parse_attributes(text: str) -> dict[str, str]:
 
 
 def parse_gff(path: str | Path) -> Iterator[Feature]:
-    """Yield validated features from a GFF3 file."""
+    """Yield validated :class:`Feature` objects from a GFF3 file.
+
+    Comment and directive lines are ignored, and parsing stops at an optional
+    embedded FASTA section. Malformed field counts, coordinates, strands,
+    scores, or phases raise ``ValueError`` with the source line number.
+    """
 
     with Path(path).open(encoding="utf-8") as handle:
         for line_number, raw_line in enumerate(handle, start=1):
             line = raw_line.rstrip("\r\n")
             if line == "##FASTA":
+                # Sequence lines after this directive are not GFF3 features.
                 break
             if not line or line.startswith("#"):
                 continue
@@ -91,7 +103,12 @@ def parse_gff(path: str | Path) -> Iterator[Feature]:
 
 
 def parse_fasta(path: str | Path) -> dict[str, str]:
-    """Read FASTA records into a mapping keyed by the first header word."""
+    """Read FASTA records into an uppercase sequence mapping.
+
+    The first whitespace-delimited header token is used as the sequence ID so
+    it matches the GFF3 ``seqid`` field. Empty and duplicate records are rejected
+    with descriptive ``ValueError`` messages.
+    """
 
     sequences: dict[str, list[str]] = {}
     current_id: str | None = None
