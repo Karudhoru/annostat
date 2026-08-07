@@ -12,8 +12,14 @@ from pathlib import Path
 
 from annostat.analysis import analyze_codons, analyze_features, cog_categories
 from annostat.cli import run_analysis
+from annostat.filtering import CdsFilter
 from annostat.models import Feature
 from annostat.parsers import parse_attributes, parse_fasta, parse_gff
+from annostat.qc import (
+    feature_quality_findings,
+    quality_summary,
+    sequence_quality_findings,
+)
 from annostat.report import render_html_report
 from annostat.sequences import (
     extract_cds_sequences,
@@ -101,6 +107,104 @@ class AnnostatTests(unittest.TestCase):
         self.assertEqual(summary["total_features"], 1)
         self.assertEqual(summary["cds_count"], 1)
 
+    def test_cds_filter_combines_all_enabled_criteria(self) -> None:
+        cds_filter = CdsFilter(
+            min_length=9,
+            max_length=12,
+            require_cog=True,
+            exclude_hypothetical=True,
+        )
+        matching = Feature(
+            "chr", "test", "CDS", 1, 9, None, "+", 0,
+            {"ID": "match", "product": "enzyme", "Dbxref": "COG:J"},
+        )
+        hypothetical = Feature(
+            "chr", "test", "CDS", 10, 18, None, "+", 0,
+            {"ID": "hyp", "product": "hypothetical protein", "Dbxref": "COG:J"},
+        )
+        missing_cog = Feature(
+            "chr", "test", "CDS", 19, 27, None, "+", 0,
+            {"ID": "no-cog", "product": "enzyme"},
+        )
+
+        self.assertTrue(cds_filter.active)
+        self.assertTrue(cds_filter.matches(matching))
+        self.assertFalse(cds_filter.matches(hypothetical))
+        self.assertFalse(cds_filter.matches(missing_cog))
+
+    def test_annotation_quality_checks_are_conservative_and_structured(self) -> None:
+        features = [
+            Feature(
+                "chr", "test", "CDS", 1, 12, None, "+", 0,
+                {"ID": "outer", "gene": "abc", "partial": "true"},
+            ),
+            Feature(
+                "chr", "test", "CDS", 4, 9, None, "-", 0,
+                {"ID": "inner", "gene": "def"},
+            ),
+            Feature(
+                "other", "test", "CDS", 1, 9, None, "+", 0,
+                {"ID": "duplicate-one", "gene": "dup"},
+            ),
+            Feature(
+                "other", "test", "CDS", 20, 28, None, "+", 0,
+                {"ID": "duplicate-two", "gene": "dup"},
+            ),
+            Feature(
+                "chr", "test", "tRNA", 13, 15, None, "+", None,
+                {"ID": "pseudo", "pseudo": "True", "product": "tRNA-Ala"},
+            ),
+        ]
+        features.extend(
+            Feature(
+                "rna", "test", "rRNA", index * 10 + 1, index * 10 + 9,
+                None, "+", None, {"ID": kind, "product": f"{kind} ribosomal RNA"},
+            )
+            for index, kind in enumerate(("5S", "16S", "23S"))
+        )
+        features.extend(
+            Feature(
+                "rna", "test", "tRNA", 40 + index * 3, 42 + index * 3,
+                None, "+", None, {"ID": amino_acid, "product": f"tRNA-{amino_acid}"},
+            )
+            for index, amino_acid in enumerate(
+                (
+                    "Ala", "Arg", "Asn", "Asp", "Cys", "Gln", "Glu", "Gly", "His", "Ile",
+                    "Leu", "Lys", "Met", "Phe", "Pro", "Ser", "Thr", "Trp", "Tyr", "Val",
+                )
+            )
+        )
+
+        findings = feature_quality_findings(features)
+        issue_counts = Counter(finding.issue_type for finding in findings)
+        self.assertEqual(issue_counts["contained_cds"], 1)
+        self.assertEqual(issue_counts["adjacent_duplicate_annotation"], 1)
+        self.assertEqual(issue_counts["pseudogene"], 1)
+        self.assertEqual(issue_counts["partial_feature"], 1)
+        self.assertNotIn("missing_rrna_type", issue_counts)
+        self.assertNotIn("missing_trna_amino_acid", issue_counts)
+
+        record = extract_cds_sequences(
+            [Feature("problem", "test", "CDS", 1, 10, None, "+", 0, {"ID": "bad"})],
+            {"problem": "ATGTAANNNN"},
+        )[0]
+        sequence_findings = sequence_quality_findings(record)
+        sequence_types = {finding.issue_type for finding in sequence_findings}
+        self.assertEqual(
+            sequence_types,
+            {"non_triplet_cds", "internal_stop_codon", "ambiguous_cds_bases"},
+        )
+
+        summary = quality_summary(
+            features,
+            {"chr": "A" * 30, "other": "GC" * 20, "rna": "A" * 120},
+            frozenset(),
+            findings + sequence_findings,
+        )
+        self.assertGreater(summary["coding_density_percent"], 0)
+        self.assertGreater(summary["genome_gc_percent"], 0)
+        self.assertEqual(summary["finding_count"], len(findings) + len(sequence_findings))
+
     def test_end_to_end_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -114,7 +218,14 @@ class AnnostatTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            summary = run_analysis(fasta, gff, output, "tsv", profile=True)
+            summary = run_analysis(
+                fasta,
+                gff,
+                output,
+                "tsv",
+                profile=True,
+                cds_filter=CdsFilter(min_length=9, require_cog=True),
+            )
 
             self.assertEqual(summary["cds_count"], 1)
             expected = {
@@ -123,6 +234,8 @@ class AnnostatTests(unittest.TestCase):
                 "tables/cog_categories.csv", "sequences/cds_nucleotide.fasta",
                 "sequences/cds_protein.fasta", "plots/cog_categories.svg",
                 "plots/cds_lengths.svg", "plots/start_codons.svg",
+                "tables/annotation_issues.csv", "filtered/features.tsv",
+                "filtered/cds_nucleotide.fasta", "filtered/cds_protein.fasta",
             }
             self.assertEqual(
                 {path.relative_to(output).as_posix() for path in output.rglob("*") if path.is_file()},
@@ -131,17 +244,30 @@ class AnnostatTests(unittest.TestCase):
             with (output / "tables" / "features.tsv").open(encoding="utf-8", newline="") as handle:
                 rows = list(csv.DictReader(handle, delimiter="\t"))
             self.assertEqual(rows[0]["ID"], "cds1")
+            with (output / "filtered" / "features.tsv").open(
+                encoding="utf-8", newline=""
+            ) as handle:
+                filtered_rows = list(csv.DictReader(handle, delimiter="\t"))
+            self.assertEqual([row["ID"] for row in filtered_rows], ["cds1"])
+            self.assertIn(
+                ">cds1 test",
+                (output / "filtered" / "cds_nucleotide.fasta").read_text(),
+            )
             written_summary = json.loads((output / "summary.json").read_text())
             self.assertEqual(written_summary["cds_count"], 1)
             self.assertRegex(written_summary["annostat_version"], r"^\d+\.\d+\.\d+$")
             self.assertEqual(written_summary["input_files"]["fasta"], str(fasta))
             self.assertEqual(written_summary["top_codons"][0]["codon"], "ATG")
-            self.assertEqual(len(written_summary["output_files"]), 11)
+            self.assertEqual(len(written_summary["output_files"]), 15)
+            self.assertEqual(written_summary["filtered_export"]["selected_cds_count"], 1)
+            self.assertIn("coding_density_percent", written_summary["quality_control"])
             self.assertIn("stage_seconds", written_summary["performance"])
             self.assertGreater(written_summary["performance"]["peak_memory_bytes"], 0)
             report = (output / "report.html").read_text(encoding="utf-8")
             self.assertIn("Bacterial annotation report", report)
             self.assertIn("Most-used codons", report)
+            self.assertIn("Annotation quality findings", report)
+            self.assertIn("Filtered CDS export", report)
             self.assertNotIn("<script", report)
             self.assertNotIn("https://", report)
             self.assertEqual(report.count("<svg "), 3)
@@ -211,6 +337,29 @@ class AnnostatTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertRegex(result.stdout, r"^annostat \d+\.\d+\.\d+")
+
+    def test_cli_rejects_an_inverted_cds_length_range(self) -> None:
+        cli_path = Path(__file__).parents[1] / "annostat" / "cli.py"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(cli_path),
+                "-f",
+                "missing.fna",
+                "-g",
+                "missing.gff3",
+                "--min-cds-length",
+                "500",
+                "--max-cds-length",
+                "100",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("cannot be greater", result.stderr)
 
     def test_cli_prints_progress_summary_and_supports_quiet_mode(self) -> None:
         cli_path = Path(__file__).parents[1] / "annostat" / "cli.py"

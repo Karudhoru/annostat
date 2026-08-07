@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TextIO
 
 from annostat.models import CdsSequence, Feature
+from annostat.qc import AnnotationIssue
 
 
 def write_overview(path: Path, features: Iterable[Feature], delimiter: str) -> None:
@@ -82,6 +83,29 @@ def write_codon_usage(path: Path, counts: Counter[str]) -> None:
         for codon, count in sorted(counts.items()):
             percentage = (100 * count / total) if total else 0
             writer.writerow([codon, count, f"{percentage:.6f}"])
+
+
+def write_annotation_findings(
+    path: Path,
+    findings: Iterable[AnnotationIssue],
+) -> None:
+    """Write all annotation-quality findings to one structured CSV file."""
+
+    fieldnames = [
+        "issue_type",
+        "severity",
+        "seqid",
+        "feature_id",
+        "related_feature_id",
+        "start",
+        "end",
+        "strand",
+        "details",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(finding.as_dict() for finding in findings)
 
 
 def write_summary(path: Path, summary: Mapping[str, object]) -> None:

@@ -18,7 +18,9 @@ import argparse
 
 from annostat import __version__
 from annostat.analysis import COG_CATEGORY_NAMES, analyze_features
+from annostat.filtering import CdsFilter
 from annostat.output import (
+    write_annotation_findings,
     write_cds_fastas,
     write_codon_usage,
     write_count_table,
@@ -27,6 +29,11 @@ from annostat.output import (
 )
 from annostat.parsers import parse_fasta, parse_gff
 from annostat.plots import write_bar_chart, write_histogram
+from annostat.qc import (
+    feature_quality_findings,
+    quality_summary,
+    sequence_quality_findings,
+)
 from annostat.report import render_html_report
 from annostat.sequences import iter_cds_sequences
 
@@ -61,8 +68,43 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile", action="store_true",
         help="measure and report peak Python memory in addition to stage timings",
     )
+    filter_group = parser.add_argument_group(
+        "filtered CDS export",
+        "write additional matching CDS tables and FASTA files without changing the full analysis",
+    )
+    filter_group.add_argument(
+        "--min-cds-length",
+        type=_positive_int,
+        metavar="BP",
+        help="include CDS features at least BP nucleotides long",
+    )
+    filter_group.add_argument(
+        "--max-cds-length",
+        type=_positive_int,
+        metavar="BP",
+        help="include CDS features at most BP nucleotides long",
+    )
+    filter_group.add_argument(
+        "--require-cog",
+        action="store_true",
+        help="include only CDS features with at least one COG category",
+    )
+    filter_group.add_argument(
+        "--exclude-hypothetical",
+        action="store_true",
+        help="exclude CDS features annotated as hypothetical proteins",
+    )
     parser.add_argument("--version", action="version", version=f"annostat {__version__}")
     return parser
+
+
+def _positive_int(value: str) -> int:
+    """Parse a strictly positive integer for a command-line option."""
+
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
 
 
 def run_analysis(
@@ -72,6 +114,7 @@ def run_analysis(
     table_format: str,
     progress: Callable[[str], None] | None = None,
     profile: bool = False,
+    cds_filter: CdsFilter | None = None,
 ) -> dict[str, object]:
     """Run the complete annotation-analysis workflow and return its summary.
 
@@ -81,6 +124,7 @@ def run_analysis(
     """
 
     notify = progress or (lambda message: None)
+    active_filter = cds_filter or CdsFilter()
     stage_timings: dict[str, float] = {}
     if profile:
         tracemalloc.start()
@@ -103,12 +147,17 @@ def run_analysis(
     plots_dir = output_dir / "plots"
     for directory in (tables_dir, sequences_dir, plots_dir):
         directory.mkdir(exist_ok=True)
+    filtered_dir = output_dir / "filtered"
+    if active_filter.active:
+        filtered_dir.mkdir(exist_ok=True)
 
     notify("Streaming, translating, and writing CDS sequences")
     stage_started = perf_counter()
     codon_counts: Counter[str] = Counter()
     start_counts: Counter[str] = Counter()
     cds_lengths: list[int] = []
+    filtered_records = []
+    quality_findings = feature_quality_findings(features)
 
     def observed_records():
         """Yield CDS records while collecting lengths for the histogram."""
@@ -122,9 +171,14 @@ def run_analysis(
             start_counts=start_counts,
         ):
             cds_lengths.append(record.feature.length)
+            quality_findings.extend(sequence_quality_findings(record))
+            if active_filter.active and active_filter.matches(record.feature):
+                filtered_records.append(record)
             yield record
 
     write_cds_fastas(sequences_dir, observed_records())
+    if active_filter.active:
+        write_cds_fastas(filtered_dir, filtered_records)
     stage_timings["cds_processing"] = perf_counter() - stage_started
 
     notify("Calculating statistics and writing analysis tables")
@@ -145,6 +199,16 @@ def run_analysis(
         }
         for codon, count in codon_counts.most_common(5)
     ]
+    summary["quality_control"] = quality_summary(
+        features,
+        genome,
+        circular_seqids,
+        quality_findings,
+    )
+    summary["filtered_export"] = {
+        **active_filter.as_dict(),
+        "selected_cds_count": len(filtered_records),
+    }
 
     delimiter = "," if table_format == "csv" else "\t"
     write_overview(tables_dir / f"features.{table_format}", features, delimiter)
@@ -155,6 +219,16 @@ def run_analysis(
         "cog_category",
         summary["cog_category_counts"],
     )
+    write_annotation_findings(
+        tables_dir / "annotation_issues.csv",
+        quality_findings,
+    )
+    if active_filter.active:
+        write_overview(
+            filtered_dir / f"features.{table_format}",
+            (record.feature for record in filtered_records),
+            delimiter,
+        )
     stage_timings["table_generation"] = perf_counter() - stage_started
 
     notify("Rendering scientific visualizations")
@@ -210,12 +284,21 @@ def run_analysis(
         "tables/codon_usage.csv",
         "tables/start_codons.csv",
         "tables/cog_categories.csv",
+        "tables/annotation_issues.csv",
         "sequences/cds_nucleotide.fasta",
         "sequences/cds_protein.fasta",
         "plots/cog_categories.svg",
         "plots/cds_lengths.svg",
         "plots/start_codons.svg",
     ]
+    if active_filter.active:
+        summary["output_files"].extend(
+            (
+                f"filtered/features.{table_format}",
+                "filtered/cds_nucleotide.fasta",
+                "filtered/cds_protein.fasta",
+            )
+        )
     summary["performance"] = {
         "stage_seconds": dict(stage_timings),
         "total_seconds": sum(stage_timings.values()),
@@ -255,12 +338,19 @@ def _print_summary(summary: dict[str, object], output_dir: Path, elapsed: float)
     rna_count = sum(summary["rna_counts"].values())
     start_counts = summary["start_codon_counts"]
     standard_starts = sum(start_counts.get(codon, 0) for codon in ("ATG", "GTG", "TTG"))
+    quality = summary["quality_control"]
+    warning_count = quality["severity_counts"].get("warning", 0)
+    information_count = quality["severity_counts"].get("info", 0)
+    warning_label = "warning" if warning_count == 1 else "warnings"
+    information_label = "finding" if information_count == 1 else "findings"
     metrics = (
         ("Genome size", f"{int(summary['genome_length']):,} bp"),
         ("Sequences", f"{len(summary['sequence_ids']):,} ({len(summary['circular_sequence_ids']):,} circular)"),
         ("Features", f"{int(summary['total_features']):,}"),
         ("CDS", f"{cds_count:,}"),
         ("RNA features", f"{rna_count:,}"),
+        ("Genome GC", f"{quality['genome_gc_percent']:.2f}%"),
+        ("Coding density", f"{quality['coding_density_percent']:.2f}%"),
         (
             "Hypothetical CDS",
             f"{int(summary['hypothetical_cds_count']):,} ({_percentage(int(summary['hypothetical_cds_count']), cds_count)})",
@@ -270,6 +360,11 @@ def _print_summary(summary: dict[str, object], output_dir: Path, elapsed: float)
             f"{int(summary['cds_with_cog_count']):,} ({_percentage(int(summary['cds_with_cog_count']), cds_count)})",
         ),
         ("ATG/GTG/TTG starts", f"{standard_starts:,} ({_percentage(standard_starts, cds_count)})"),
+        (
+            "QC review",
+            f"{warning_count:,} {warning_label}, "
+            f"{information_count:,} informational {information_label}",
+        ),
     )
     print("\nAnalysis summary")
     print("-" * 56)
@@ -301,6 +396,18 @@ def main(arguments: list[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(arguments)
+    if (
+        args.min_cds_length is not None
+        and args.max_cds_length is not None
+        and args.min_cds_length > args.max_cds_length
+    ):
+        parser.error("--min-cds-length cannot be greater than --max-cds-length")
+    cds_filter = CdsFilter(
+        min_length=args.min_cds_length,
+        max_length=args.max_cds_length,
+        require_cog=args.require_cog,
+        exclude_hypothetical=args.exclude_hypothetical,
+    )
     started = perf_counter()
     if not args.quiet:
         print(f"annostat {__version__} | bacterial genome annotation analysis")
@@ -322,7 +429,8 @@ def main(arguments: list[str] | None = None) -> int:
             args.output,
             args.table_format,
             None if args.quiet else report_progress,
-            args.profile,
+            profile=args.profile,
+            cds_filter=cds_filter,
         )
     except (OSError, ValueError) as error:
         parser.error(str(error))
