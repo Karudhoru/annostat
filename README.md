@@ -18,18 +18,38 @@ It uses only the Python standard library and supports multi-record FASTA files.
 - Python 3.10 or newer
 - Matching sequence identifiers in the GFF3 and FASTA inputs
 
-## Usage
+## Installation
 
-Run directly from a repository checkout:
+For development, install annostat in editable mode from the repository root:
 
-```powershell
-python3 -m annostat -f data/GCF_000007145.1.fna -g data/GCF_000007145.1.gff3 -o results
+```bash
+python -m pip install -e .
+annostat --version
 ```
 
-Direct execution is also supported: `python3 annostat/cli.py --help`.
+Editable mode keeps the `annostat` command connected to this checkout, so source
+changes take effect without reinstalling. If Bash has cached command locations,
+run `hash -r` once after installation.
 
-Use `--table-format tsv` for a tab-separated feature overview. Install the package
-with `python -m pip install .` to make the equivalent `annostat` command available.
+For a regular installation that copies the current version into the active Python
+environment, use:
+
+```bash
+python -m pip install .
+```
+
+## Usage
+
+After installation, run annostat from any directory:
+
+```bash
+annostat -f data/GCF_000007145.1.fna -g data/GCF_000007145.1.gff3 -o results
+```
+
+Without installing, module execution remains available from the repository root:
+`python3 -m annostat --help`.
+
+Use `--table-format tsv` for a tab-separated feature overview.
 
 The output directory contains:
 
@@ -43,7 +63,7 @@ The output directory contains:
 ## Example run
 
 ```bash
-python3 annostat/cli.py \
+annostat \
   -f data/GCF_000007145.1.fna \
   -g data/GCF_000007145.1.gff3 \
   -o results \
