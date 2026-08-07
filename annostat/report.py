@@ -7,10 +7,14 @@ from pathlib import Path
 
 
 def _percentage(part: int, whole: int) -> str:
+    """Format a part-to-whole ratio as a percentage, including zero totals."""
+
     return f"{100 * part / whole:.2f}%" if whole else "0.00%"
 
 
 def _metric(label: str, value: str, note: str) -> str:
+    """Render one escaped summary metric card."""
+
     return (
         '<article class="metric">'
         f'<div class="metric-label">{escape(label)}</div>'
@@ -21,6 +25,8 @@ def _metric(label: str, value: str, note: str) -> str:
 
 
 def _embedded_svg(path: Path, heading: str) -> str:
+    """Read an SVG plot and wrap it in a report figure section."""
+
     svg = path.read_text(encoding="utf-8")
     return f'<section class="figure"><h2>{escape(heading)}</h2>{svg}</section>'
 
@@ -29,7 +35,11 @@ def render_html_report(
     summary: dict[str, object],
     plot_paths: list[tuple[Path, str]],
 ) -> str:
-    """Render a self-contained analysis report with inline SVG figures."""
+    """Render a self-contained HTML analysis report with inline SVG figures.
+
+    User-controlled paths and labels are HTML-escaped, and the generated report
+    has no external scripts, fonts, stylesheets, or network dependencies.
+    """
 
     cds_count = int(summary["cds_count"])
     rna_count = sum(summary["rna_counts"].values())

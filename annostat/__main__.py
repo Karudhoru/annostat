@@ -1,3 +1,5 @@
+"""Allow ``python -m annostat`` to invoke the command-line interface."""
+
 from annostat.cli import main
 
 
