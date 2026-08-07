@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from annostat.analysis import analyze_codons, analyze_features, cog_categories
@@ -83,12 +84,22 @@ class AnnostatTests(unittest.TestCase):
                 "features.tsv", "cds_nucleotide.fasta", "cds_protein.fasta",
                 "codon_usage.csv", "start_codons.csv", "cog_categories.csv",
                 "summary.json", "cog_categories.svg", "cds_lengths.svg",
+                "start_codons.svg", "codon_usage.svg",
             }
             self.assertEqual({path.name for path in output.iterdir()}, expected)
             with (output / "features.tsv").open(encoding="utf-8", newline="") as handle:
                 rows = list(csv.DictReader(handle, delimiter="\t"))
             self.assertEqual(rows[0]["ID"], "cds1")
-            self.assertEqual(json.loads((output / "summary.json").read_text())["cds_count"], 1)
+            written_summary = json.loads((output / "summary.json").read_text())
+            self.assertEqual(written_summary["cds_count"], 1)
+            self.assertRegex(written_summary["annostat_version"], r"^\d+\.\d+\.\d+$")
+            self.assertEqual(written_summary["input_files"]["fasta"], str(fasta))
+            for plot_name in (
+                "cog_categories.svg", "cds_lengths.svg", "start_codons.svg", "codon_usage.svg"
+            ):
+                root_element = ET.parse(output / plot_name).getroot()
+                self.assertTrue(root_element.tag.endswith("svg"))
+                self.assertIsNotNone(root_element.find("{http://www.w3.org/2000/svg}title"))
 
     def test_parser_reports_invalid_gff(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -123,6 +134,49 @@ class AnnostatTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Analyze bacterial GFF3", result.stdout)
+
+    def test_cli_reports_version(self) -> None:
+        cli_path = Path(__file__).parents[1] / "annostat" / "cli.py"
+        result = subprocess.run(
+            [sys.executable, str(cli_path), "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"^annostat \d+\.\d+\.\d+")
+
+    def test_cli_prints_progress_summary_and_supports_quiet_mode(self) -> None:
+        cli_path = Path(__file__).parents[1] / "annostat" / "cli.py"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fasta = root / "genome.fna"
+            gff = root / "genes.gff3"
+            fasta.write_text(">chr\nATGAAATAA\n", encoding="utf-8")
+            gff.write_text(
+                "chr\ttest\tCDS\t1\t9\t.\t+\t0\tID=cds1;product=test;Dbxref=COG:J\n",
+                encoding="utf-8",
+            )
+            command = [
+                sys.executable, str(cli_path), "-f", str(fasta), "-g", str(gff),
+                "-o", str(root / "results"),
+            ]
+
+            result = subprocess.run(command, check=False, capture_output=True, text=True)
+            quiet_result = subprocess.run(
+                command[:-1] + [str(root / "quiet-results"), "--quiet"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[1/5] Reading GFF3", result.stdout)
+        self.assertIn("Analysis summary", result.stdout)
+        self.assertIn("ATG/GTG/TTG starts", result.stdout)
+        self.assertEqual(quiet_result.returncode, 0, quiet_result.stderr)
+        self.assertEqual(quiet_result.stdout, "")
 
 
 if __name__ == "__main__":
