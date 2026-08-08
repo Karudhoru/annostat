@@ -1,9 +1,7 @@
 # Annostat
 
 **Annostat** analyzes bacterial genome annotations from matching GFF3 and FASTA
-files. The project and reports use the name **Annostat**; the installable command
-and Python package remain lowercase as `annostat`. Local analysis uses only the
-Python standard library and supports multi-record FASTA files.
+files. Local analysis uses only the Python standard library and supports multi-record FASTA files.
 
 ## Features
 
