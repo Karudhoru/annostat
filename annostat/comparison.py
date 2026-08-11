@@ -12,6 +12,7 @@ from html import escape
 from pathlib import Path
 from statistics import median
 from typing import Callable, Iterable
+from urllib.parse import parse_qs, urlparse
 
 from annostat import __version__
 from annostat.analysis import COG_CATEGORY_NAMES, analyze_features
@@ -19,7 +20,13 @@ from annostat.models import Feature
 from annostat.parsers import parse_fasta, parse_gff
 from annostat.plots import write_cog_comparison, write_comparison_overview
 from annostat.qc import feature_quality_findings, quality_summary, sequence_quality_findings
-from annostat.sequences import iter_cds_sequences
+from annostat.sequences import (
+    declared_genetic_codes,
+    iter_cds_sequences,
+    recognized_start_codons,
+    resolve_genetic_code,
+)
+from annostat.validation import validate_annotation
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +37,7 @@ class GenomeInput:
     fasta: Path
     gff: Path
     metadata: dict[str, object] | None = None
+    genetic_code: int | None = None
 
 
 def _sha256(path: Path) -> str:
@@ -98,16 +106,21 @@ def _gff_metadata(path: Path) -> dict[str, object]:
             elif text.startswith("# annotated with "):
                 metadata["annotation_pipeline"] = text.removeprefix("# annotated with ").strip()
             elif text.startswith("#!genome-build-accession "):
-                metadata["assembly_accession"] = text.removeprefix("#!genome-build-accession ").strip()
+                accession = text.removeprefix("#!genome-build-accession ").strip()
+                metadata["assembly_accession"] = accession.removeprefix("NCBI_Assembly:")
             elif text.startswith("#!genome-build "):
                 metadata["assembly_name"] = text.removeprefix("#!genome-build ").strip()
             elif text.startswith("#!annotation-source "):
                 metadata["annotation_provider"] = text.removeprefix("#!annotation-source ").strip()
             elif text.startswith("##species "):
-                taxonomy_reference = text.removeprefix("##species ").strip().rstrip("/")
-                tax_id = taxonomy_reference.rsplit("/", 1)[-1]
-                if tax_id.isdigit():
-                    metadata["taxonomy_id"] = int(tax_id)
+                taxonomy_reference = text.removeprefix("##species ").strip()
+                query_id = parse_qs(urlparse(taxonomy_reference).query).get("id", [])
+                if query_id and query_id[0].isdigit():
+                    metadata["taxonomy_id"] = int(query_id[0])
+                else:
+                    trailing_id = taxonomy_reference.rstrip("/").rsplit("/", 1)[-1]
+                    if trailing_id.isdigit():
+                        metadata["taxonomy_id"] = int(trailing_id)
     return metadata
 
 
@@ -123,6 +136,17 @@ def _taxonomic_relationship(left: dict[str, object], right: dict[str, object]) -
 def _annotation_profile(dataset: GenomeInput) -> dict[str, object]:
     """Calculate the normalized comparison profile for one input dataset."""
 
+    validation = validate_annotation(dataset.fasta, dataset.gff)
+    if not validation["valid"]:
+        errors = [
+            finding for finding in validation["findings"]
+            if finding["severity"] == "error"
+        ]
+        first = errors[0]
+        raise ValueError(
+            f"dataset {dataset.label!r} failed validation with {len(errors)} error(s): "
+            f"{first['rule_id']}: {first['message']}"
+        )
     features = list(parse_gff(dataset.gff))
     genome = parse_fasta(dataset.fasta)
     circular_seqids = frozenset(
@@ -131,12 +155,32 @@ def _annotation_profile(dataset: GenomeInput) -> dict[str, object]:
         if feature.type == "region"
         and feature.attributes.get("Is_circular", "").lower() == "true"
     )
+    declared_codes = declared_genetic_codes(features)
+    genetic_code = resolve_genetic_code(features, dataset.genetic_code)
+    genetic_code_source = (
+        "command_line" if dataset.genetic_code is not None
+        else "gff3" if declared_codes
+        else "default"
+    )
     findings = feature_quality_findings(features, genome, circular_seqids)
     start_counts: Counter[str] = Counter()
     cds_lengths: list[int] = []
-    for record in iter_cds_sequences(features, genome, circular_seqids, start_counts=start_counts):
-        cds_lengths.append(record.feature.length)
-        findings.extend(sequence_quality_findings(record))
+    for record in iter_cds_sequences(
+        features,
+        genome,
+        circular_seqids,
+        start_counts=start_counts,
+        genetic_code=genetic_code,
+    ):
+        cds_lengths.append(record.length)
+        findings.extend(
+            sequence_quality_findings(
+                record,
+                genetic_code,
+                sequence_length=len(genome[record.feature.seqid]),
+                circular=record.feature.seqid in circular_seqids,
+            )
+        )
 
     feature_summary = analyze_features(features)
     quality = quality_summary(features, genome, circular_seqids, findings)
@@ -157,7 +201,9 @@ def _annotation_profile(dataset: GenomeInput) -> dict[str, object]:
     cog_data_available = bool(cog_counts)
     cog_total = sum(cog_counts.values())
     start_total = sum(start_counts.values())
-    standard_starts = sum(start_counts.get(codon, 0) for codon in ("ATG", "GTG", "TTG"))
+    recognized_starts = sum(
+        start_counts.get(codon, 0) for codon in recognized_start_codons(genetic_code)
+    )
     metadata = {**_gff_metadata(dataset.gff), **(dataset.metadata or {})}
     organism_name = metadata.get("organism_name")
     return {
@@ -172,10 +218,18 @@ def _annotation_profile(dataset: GenomeInput) -> dict[str, object]:
         "annotation_provider": metadata.get("annotation_provider"),
         "annotation_release": metadata.get("annotation_release"),
         "annotation_pipeline": metadata.get("annotation_pipeline"),
+        "genetic_code": genetic_code,
+        "genetic_code_source": genetic_code_source,
         "checkm_completeness": metadata.get("checkm_completeness"),
         "checkm_contamination": metadata.get("checkm_contamination"),
         "inputs": {"fasta": str(dataset.fasta), "gff3": str(dataset.gff)},
         "sha256": {"fasta": _sha256(dataset.fasta), "gff3": _sha256(dataset.gff)},
+        "validation": {
+            "valid": validation["valid"],
+            "ruleset_version": validation["ruleset_version"],
+            "scientific_fingerprint": validation["scientific_fingerprint"],
+            "severity_counts": validation["severity_counts"],
+        },
         "annotation_sources": dict(sorted(source_counts.items())),
         "genome_length": genome_length,
         "sequence_count": len(genome),
@@ -193,8 +247,9 @@ def _annotation_profile(dataset: GenomeInput) -> dict[str, object]:
             if cds_count and cog_data_available else None
         ),
         "cog_data_available": cog_data_available,
-        "standard_start_percent": 100 * standard_starts / start_total if start_total else 0,
+        "recognized_start_percent": 100 * recognized_starts / cds_count if cds_count else 0,
         "qc_warning_count": quality["severity_counts"].get("warning", 0),
+        "qc_issue_counts": quality["issue_counts"],
         "cog_category_percentages": {
             category: 100 * count / cog_total if cog_total else 0
             for category, count in sorted(cog_counts.items())
@@ -243,7 +298,7 @@ _NUMERIC_METRICS = (
     "genome_length", "sequence_count", "total_features", "cds_count", "rna_count",
     "gc_percent", "coding_density_percent", "cds_per_mb", "median_cds_length",
     "hypothetical_percent", "gene_name_percent", "cog_coverage_percent",
-    "standard_start_percent", "qc_warning_count",
+    "recognized_start_percent", "qc_warning_count",
 )
 
 
@@ -305,6 +360,8 @@ def _profile_table_rows(profiles: list[dict[str, object]]) -> list[dict[str, obj
             "input_source": profile["input_source"],
             "assembly_accession": profile["assembly_accession"],
             "annotation": profile["annotation_provider"] or profile["annotation_pipeline"],
+            "genetic_code": profile["genetic_code"],
+            "genetic_code_source": profile["genetic_code_source"],
             **{metric: profile[metric] for metric in _NUMERIC_METRICS},
             "cog_data_available": profile["cog_data_available"],
             "cog_coverage_percent": (
@@ -330,6 +387,7 @@ def _render_report(summary: dict[str, object], plot_paths: list[Path]) -> str:
         f'<td><strong>{escape(str(profile["label"]))}</strong></td>'
         f'<td>{escape(str(profile["organism_name"] or "Not provided"))}</td>'
         f'<td>{escape(str(profile["input_source"]))}</td>'
+        f'<td>{profile["genetic_code"]}</td>'
         f'<td>{profile["genome_length"]:,} bp</td><td>{profile["cds_count"]:,}</td>'
         f'<td>{profile["gc_percent"]:.2f}%</td><td>{profile["coding_density_percent"]:.2f}%</td>'
         f'<td>{_display_cog_coverage(profile)}</td></tr>'
@@ -381,7 +439,7 @@ details summary{{cursor:pointer;font-weight:700}}details .table-wrap{{margin-top
 <h1>Genome annotation comparison</h1><p class="subtitle">A normalized comparison of annotated bacterial assemblies. Dataset labels do not imply strain-level relatedness.</p>
 <div class="tags"><span class="tag">{len(profiles)} assemblies</span><span class="tag">{escape(scope_label)}</span></div>
 {warning_panel}
-<section class="panel"><h2>Assemblies</h2><div class="table-wrap"><table><thead><tr><th>Dataset</th><th>Organism</th><th>Input source</th><th>Genome</th><th>CDS</th><th>GC</th><th>Coding</th><th>COG coverage</th></tr></thead><tbody>{overview_rows}</tbody></table></div></section>
+<section class="panel"><h2>Assemblies</h2><div class="table-wrap"><table><thead><tr><th>Dataset</th><th>Organism</th><th>Input source</th><th>Genetic code</th><th>Genome</th><th>CDS</th><th>GC</th><th>Coding</th><th>COG coverage</th></tr></thead><tbody>{overview_rows}</tbody></table></div></section>
 {figure_sections}
 <section class="panel"><h2>Pairwise comparison</h2><div class="table-wrap"><table><thead><tr><th>Pair</th><th>Taxonomic scope</th><th>Gene labels</th><th>COG IDs</th><th>COG profile distance</th><th>Start profile distance</th></tr></thead><tbody>{pair_rows}</tbody></table></div>
 <p class="note">Jaccard values range from 0 to 1 and describe exact annotation-label overlap. Profile distances range from 0 (same distribution) to 1 (maximally different). Neither measure establishes orthology, ANI, or phylogeny.</p></section>
@@ -444,6 +502,10 @@ def run_comparison(
     if len(source_signatures) > 1:
         warnings.append(
             "Annotation source fields differ between datasets; pipeline differences may explain part of the observed variation."
+        )
+    if len({profile["genetic_code"] for profile in profiles}) > 1:
+        warnings.append(
+            "Translation tables differ between datasets. Each genome was translated and quality-checked with its own declared or selected genetic code."
         )
     if any(not profile["cog_data_available"] for profile in profiles):
         warnings.append(

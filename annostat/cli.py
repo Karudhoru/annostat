@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sys
 import tracemalloc
 from collections import Counter
@@ -18,6 +20,7 @@ import argparse
 
 from annostat import __version__
 from annostat.analysis import COG_CATEGORY_NAMES, analyze_features
+from annostat.cohort import build_cohort, write_cohort
 from annostat.comparison import GenomeInput, run_comparison
 from annostat.filtering import CdsFilter
 from annostat.ncbi import fetch_genomes
@@ -37,21 +40,76 @@ from annostat.qc import (
     sequence_quality_findings,
 )
 from annostat.report import render_html_report
-from annostat.sequences import iter_cds_sequences
+from annostat.sequences import (
+    SUPPORTED_GENETIC_CODES,
+    declared_genetic_codes,
+    iter_cds_sequences,
+    recognized_start_codons,
+    resolve_genetic_code,
+)
+from annostat.validation import validate_annotation, write_validation
 
 
-def build_parser() -> argparse.ArgumentParser:
+def _scientific_fingerprint(summary: dict[str, object]) -> str:
+    """Hash scientific outputs while excluding paths and performance timings."""
+
+    payload = {
+        key: value
+        for key, value in summary.items()
+        if key not in {"input_files", "output_files", "performance", "scientific_fingerprint"}
+    }
+    validation = payload.get("validation")
+    if isinstance(validation, dict):
+        payload["validation"] = {
+            key: value for key, value in validation.items() if key != "input_files"
+        }
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def build_root_parser() -> argparse.ArgumentParser:
+    """Build the command overview shown by ``annostat --help``."""
+
+    return argparse.ArgumentParser(
+        prog="annostat",
+        description=(
+            "Analyze bacterial GFF3 annotations, validate input integrity, and "
+            "summarize or compare completed analyses."
+        ),
+        epilog=(
+            "commands:\n"
+            "  inspect     analyze one FASTA/GFF3 annotation pair\n"
+            "  validate    check deterministic structural integrity\n"
+            "  summarize   aggregate completed Annostat summaries\n"
+            "  compare     compare two or more annotated genomes\n"
+            "  fetch       download annotated NCBI assemblies\n\n"
+            "Run 'annostat COMMAND --help' for command-specific options. "
+            "Legacy 'annostat -f ... -g ...' inspection remains supported."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+
+def build_parser(prog: str = "annostat") -> argparse.ArgumentParser:
     """Build the command-line argument parser."""
 
     parser = argparse.ArgumentParser(
-        prog="annostat",
+        prog=prog,
         description="Analyze bacterial GFF3 annotations against a genome FASTA file.",
         epilog=(
             "examples:\n"
             "  %(prog)s -f genome.fna -g annotations.gff3\n"
+            "  annostat validate -f genome.fna -g annotations.gff3\n"
+            "  annostat summarize results/batch -o cohort\n"
             "  %(prog)s -f genome.fna -g annotations.gff3 -o results --table-format tsv\n"
-            "  %(prog)s compare --genome a a.fna a.gff3 --genome b b.fna b.gff3\n"
-            "  %(prog)s fetch GCF_000007145.1 -o ncbi_data\n\n"
+            "  annostat compare --genome a a.fna a.gff3 --genome b b.fna b.gff3\n"
+            "  annostat fetch GCF_000007145.1 -o ncbi_data\n\n"
             "The output includes an offline HTML report, analysis tables, CDS FASTA files, "
             "and up to three publication-ready SVG charts. Use the compare and fetch commands "
             "for multi-genome profiles and NCBI assembly downloads."
@@ -72,6 +130,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--profile", action="store_true",
         help="measure and report peak Python memory in addition to stage timings",
+    )
+    parser.add_argument(
+        "--genetic-code", type=int, choices=(4, 11, 25), default=None, metavar="TABLE",
+        help=(
+            "override the NCBI translation table; otherwise use GFF3 transl_table "
+            "or fall back to 11"
+        ),
     )
     filter_group = parser.add_argument_group(
         "filtered CDS export",
@@ -103,6 +168,49 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_validate_parser() -> argparse.ArgumentParser:
+    """Build the parser for deterministic FASTA/GFF3 validation."""
+
+    parser = argparse.ArgumentParser(
+        prog="annostat validate",
+        description=(
+            "Validate structural and cross-file integrity without making "
+            "taxon-dependent biological claims."
+        ),
+    )
+    parser.add_argument("-f", "--fasta", required=True, type=Path, metavar="FILE")
+    parser.add_argument("-g", "--gff", required=True, type=Path, metavar="FILE")
+    parser.add_argument(
+        "-o", "--output", type=Path, default=Path("annostat_validation"), metavar="DIR",
+        help="result directory (default: annostat_validation)",
+    )
+    parser.add_argument(
+        "--fail-on", choices=("error", "warning", "never"), default="error",
+        help="return status 1 for this severity or above (default: error)",
+    )
+    parser.add_argument("-q", "--quiet", action="store_true")
+    return parser
+
+
+def build_summarize_parser() -> argparse.ArgumentParser:
+    """Build the parser for MultiQC-style aggregation of Annostat outputs."""
+
+    parser = argparse.ArgumentParser(
+        prog="annostat summarize",
+        description="Aggregate one or more Annostat summary.json files into a cohort report.",
+    )
+    parser.add_argument(
+        "inputs", nargs="+", type=Path, metavar="PATH",
+        help="summary.json file or directory to scan recursively",
+    )
+    parser.add_argument(
+        "-o", "--output", type=Path, default=Path("annostat_cohort"), metavar="DIR",
+        help="result directory (default: annostat_cohort)",
+    )
+    parser.add_argument("-q", "--quiet", action="store_true")
+    return parser
+
+
 def build_compare_parser() -> argparse.ArgumentParser:
     """Build the parser for comparative annotation profiling."""
 
@@ -125,6 +233,17 @@ def build_compare_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reference", "--accession", dest="references", action="append", metavar="GCF_OR_GCA",
         help="external NCBI assembly to include in the comparison; repeat as needed",
+    )
+    parser.add_argument(
+        "--genetic-code",
+        dest="genetic_codes",
+        action="append",
+        nargs=2,
+        metavar=("LABEL", "TABLE"),
+        help=(
+            "override the translation table for one labelled genome or reference; "
+            "repeat as needed"
+        ),
     )
     parser.add_argument(
         "-o", "--output", type=Path, default=Path("annostat_comparison"), metavar="DIR",
@@ -166,6 +285,7 @@ def run_analysis(
     progress: Callable[[str], None] | None = None,
     profile: bool = False,
     cds_filter: CdsFilter | None = None,
+    genetic_code: int | None = None,
 ) -> dict[str, object]:
     """Run the complete annotation-analysis workflow and return its summary.
 
@@ -182,8 +302,26 @@ def run_analysis(
 
     notify("Reading GFF3 annotations and FASTA sequences")
     stage_started = perf_counter()
+    validation = validate_annotation(fasta_path, gff_path)
+    if not validation["valid"]:
+        errors = [
+            finding for finding in validation["findings"]
+            if finding["severity"] == "error"
+        ]
+        first = errors[0]
+        raise ValueError(
+            f"input validation failed with {len(errors)} error(s): "
+            f"{first['rule_id']}: {first['message']}"
+        )
     features = list(parse_gff(gff_path))
     genome = parse_fasta(fasta_path)
+    declared_codes = declared_genetic_codes(features)
+    selected_genetic_code = resolve_genetic_code(features, genetic_code)
+    genetic_code_source = (
+        "command_line" if genetic_code is not None
+        else "gff3" if declared_codes
+        else "default"
+    )
     circular_seqids = frozenset(
         feature.seqid
         for feature in features
@@ -198,9 +336,25 @@ def run_analysis(
     plots_dir = output_dir / "plots"
     for directory in (tables_dir, sequences_dir, plots_dir):
         directory.mkdir(exist_ok=True)
+    stale_table_format = "tsv" if table_format == "csv" else "csv"
+    (tables_dir / f"features.{stale_table_format}").unlink(missing_ok=True)
     filtered_dir = output_dir / "filtered"
     if active_filter.active:
         filtered_dir.mkdir(exist_ok=True)
+        (filtered_dir / f"features.{stale_table_format}").unlink(missing_ok=True)
+    elif filtered_dir.is_dir():
+        for generated_name in (
+            "features.csv",
+            "features.tsv",
+            "cds_nucleotide.fasta",
+            "cds_protein.fasta",
+        ):
+            (filtered_dir / generated_name).unlink(missing_ok=True)
+        try:
+            filtered_dir.rmdir()
+        except OSError:
+            # Preserve any files in filtered/ that Annostat did not generate.
+            pass
 
     notify("Streaming, translating, and writing CDS sequences")
     stage_started = perf_counter()
@@ -220,10 +374,20 @@ def run_analysis(
             circular_seqids,
             codon_counts=codon_counts,
             start_counts=start_counts,
+            genetic_code=selected_genetic_code,
         ):
-            cds_lengths.append(record.feature.length)
-            quality_findings.extend(sequence_quality_findings(record))
-            if active_filter.active and active_filter.matches(record.feature):
+            cds_lengths.append(record.length)
+            quality_findings.extend(
+                sequence_quality_findings(
+                    record,
+                    selected_genetic_code,
+                    sequence_length=len(genome[record.feature.seqid]),
+                    circular=record.feature.seqid in circular_seqids,
+                )
+            )
+            if active_filter.active and active_filter.matches(
+                record.feature, length=record.length
+            ):
                 filtered_records.append(record)
             yield record
 
@@ -237,6 +401,8 @@ def run_analysis(
     summary = analyze_features(features)
     summary["cog_data_available"] = bool(summary["cog_category_counts"])
     summary["annostat_version"] = __version__
+    summary["genetic_code"] = selected_genetic_code
+    summary["genetic_code_source"] = genetic_code_source
     summary["input_files"] = {"fasta": str(fasta_path), "gff3": str(gff_path)}
     summary["sequence_ids"] = sorted(genome)
     summary["circular_sequence_ids"] = sorted(circular_seqids)
@@ -257,6 +423,7 @@ def run_analysis(
         circular_seqids,
         quality_findings,
     )
+    summary["validation"] = validation
     summary["filtered_export"] = {
         **active_filter.as_dict(),
         "selected_cds_count": len(filtered_records),
@@ -275,6 +442,7 @@ def run_analysis(
         tables_dir / "annotation_issues.csv",
         quality_findings,
     )
+    write_validation(output_dir / "validation", validation)
     if active_filter.active:
         write_overview(
             filtered_dir / f"features.{table_format}",
@@ -305,21 +473,31 @@ def run_analysis(
         "CDS length distribution (nucleotides)",
         cds_lengths,
     )
+    selected_start_codons = recognized_start_codons(selected_genetic_code)
+    common_start_codons = {"ATG", "GTG", "TTG"}
+    other_recognized_starts = sum(
+        start_counts.get(codon, 0)
+        for codon in selected_start_codons - common_start_codons
+    )
+    recognized_start_total = sum(
+        start_counts.get(codon, 0) for codon in selected_start_codons
+    )
     grouped_starts = {
         "ATG": start_counts.get("ATG", 0),
         "GTG": start_counts.get("GTG", 0),
         "TTG": start_counts.get("TTG", 0),
-        "Other": sum(start_counts.values())
-        - start_counts.get("ATG", 0)
-        - start_counts.get("GTG", 0)
-        - start_counts.get("TTG", 0),
+        "Other recognized": other_recognized_starts,
+        "Unrecognized": sum(start_counts.values()) - recognized_start_total,
     }
     # The chart stays readable while the CSV retains every observed start codon.
     write_bar_chart(
         plots_dir / "start_codons.svg",
         "Start codon usage",
         grouped_starts,
-        description=f"Observed first codon across {len(cds_lengths):,} coding sequences",
+        description=(
+            f"Observed first codon across {len(cds_lengths):,} coding sequences; "
+            f"recognized initiators follow NCBI table {selected_genetic_code}"
+        ),
         axis_label="Coding sequences",
         sort_by_value=False,
         percentage_total=len(cds_lengths),
@@ -341,6 +519,8 @@ def run_analysis(
         "tables/start_codons.csv",
         "tables/cog_categories.csv",
         "tables/annotation_issues.csv",
+        "validation/validation.json",
+        "validation/validation.tsv",
         "sequences/cds_nucleotide.fasta",
         "sequences/cds_protein.fasta",
         "plots/cds_lengths.svg",
@@ -361,6 +541,7 @@ def run_analysis(
         "total_seconds": sum(stage_timings.values()),
         "peak_memory_bytes": tracemalloc.get_traced_memory()[1] if profile else None,
     }
+    summary["scientific_fingerprint"] = _scientific_fingerprint(summary)
     stage_started = perf_counter()
     render_html_report(summary, plot_paths)
     stage_timings["report_generation"] = perf_counter() - stage_started
@@ -372,6 +553,7 @@ def run_analysis(
         "total_seconds": sum(stage_timings.values()),
         "peak_memory_bytes": peak_memory,
     }
+    summary["scientific_fingerprint"] = _scientific_fingerprint(summary)
     (output_dir / "report.html").write_text(
         render_html_report(summary, plot_paths), encoding="utf-8"
     )
@@ -391,7 +573,10 @@ def _print_summary(summary: dict[str, object], output_dir: Path, elapsed: float)
     cds_count = int(summary["cds_count"])
     rna_count = sum(summary["rna_counts"].values())
     start_counts = summary["start_codon_counts"]
-    standard_starts = sum(start_counts.get(codon, 0) for codon in ("ATG", "GTG", "TTG"))
+    recognized_starts = sum(
+        start_counts.get(codon, 0)
+        for codon in recognized_start_codons(int(summary["genetic_code"]))
+    )
     quality = summary["quality_control"]
     warning_count = quality["severity_counts"].get("warning", 0)
     information_count = quality["severity_counts"].get("info", 0)
@@ -416,7 +601,10 @@ def _print_summary(summary: dict[str, object], output_dir: Path, elapsed: float)
                 if summary["cog_data_available"] else "not available"
             ),
         ),
-        ("ATG/GTG/TTG starts", f"{standard_starts:,} ({_percentage(standard_starts, cds_count)})"),
+        (
+            "Recognized starts",
+            f"{recognized_starts:,} ({_percentage(recognized_starts, cds_count)})",
+        ),
         (
             "QC review",
             f"{warning_count:,} {warning_label}, "
@@ -452,12 +640,30 @@ def main(arguments: list[str] | None = None) -> int:
     """Parse arguments, run the analysis, and report its output location."""
 
     command_arguments = list(sys.argv[1:] if arguments is None else arguments)
+    if not command_arguments or command_arguments == ["--help"] or command_arguments == ["-h"]:
+        build_root_parser().print_help()
+        return 0
+    if command_arguments == ["--version"]:
+        print(f"Annostat {__version__}")
+        return 0
+    if command_arguments[:1] == ["validate"]:
+        return _main_validate(command_arguments[1:])
+    if command_arguments[:1] == ["inspect"]:
+        return _main_analysis(command_arguments[1:], prog="annostat inspect")
+    if command_arguments[:1] == ["summarize"]:
+        return _main_summarize(command_arguments[1:])
     if command_arguments[:1] == ["compare"]:
         return _main_compare(command_arguments[1:])
     if command_arguments[:1] == ["fetch"]:
         return _main_fetch(command_arguments[1:])
 
-    parser = build_parser()
+    return _main_analysis(command_arguments)
+
+
+def _main_analysis(command_arguments: list[str], prog: str = "annostat") -> int:
+    """Run the full biological inspection and reporting workflow."""
+
+    parser = build_parser(prog)
     args = parser.parse_args(command_arguments)
     if (
         args.min_cds_length is not None
@@ -494,6 +700,7 @@ def main(arguments: list[str] | None = None) -> int:
             None if args.quiet else report_progress,
             profile=args.profile,
             cds_filter=cds_filter,
+            genetic_code=args.genetic_code,
         )
     except (OSError, ValueError) as error:
         parser.error(str(error))
@@ -502,13 +709,68 @@ def main(arguments: list[str] | None = None) -> int:
     return 0
 
 
+def _main_validate(arguments: list[str]) -> int:
+    """Run deterministic structural validation and return a CI-friendly status."""
+
+    parser = build_validate_parser()
+    args = parser.parse_args(arguments)
+    result = validate_annotation(args.fasta, args.gff)
+    files = write_validation(args.output, result)
+    counts = result["severity_counts"]
+    if not args.quiet:
+        status = "PASS" if result["valid"] else "FAIL"
+        print(f"Annostat {__version__} | annotation validation {status}")
+        print(f"  Errors                   {counts['error']:,}")
+        print(f"  Warnings                 {counts['warning']:,}")
+        print(f"  Findings                 {sum(counts.values()):,}")
+        print(f"  Output                   {args.output.resolve()}")
+        print(f"  Files written            {len(files)}")
+    if args.fail_on == "never":
+        return 0
+    if counts["error"]:
+        return 1
+    if args.fail_on == "warning" and counts["warning"]:
+        return 1
+    return 0
+
+
+def _main_summarize(arguments: list[str]) -> int:
+    """Aggregate completed inspections into a deterministic cohort package."""
+
+    parser = build_summarize_parser()
+    args = parser.parse_args(arguments)
+    try:
+        cohort = build_cohort(args.inputs)
+        files = write_cohort(args.output, cohort)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    if not args.quiet:
+        print(f"Annostat {__version__} | cohort annotation QC")
+        print(f"  Samples                  {cohort['sample_count']:,}")
+        print(f"  Output                   {args.output.resolve()}")
+        print(f"  Files written            {len(files)}")
+        print(f"  Report                   {(args.output / 'cohort.html').resolve()}")
+    return 0
+
+
 def _main_compare(arguments: list[str]) -> int:
     """Parse and run the comparative-analysis command."""
 
     parser = build_compare_parser()
     args = parser.parse_args(arguments)
+    code_overrides: dict[str, int] = {}
+    for label, raw_code in args.genetic_codes or []:
+        if label in code_overrides:
+            parser.error(f"--genetic-code was supplied more than once for {label!r}")
+        try:
+            code = int(raw_code)
+        except ValueError:
+            parser.error(f"genetic code for {label!r} must be 4, 11, or 25")
+        if code not in SUPPORTED_GENETIC_CODES:
+            parser.error(f"genetic code for {label!r} must be 4, 11, or 25")
+        code_overrides[label] = code
     datasets = [
-        GenomeInput(label, Path(fasta), Path(gff))
+        GenomeInput(label, Path(fasta), Path(gff), genetic_code=code_overrides.get(label))
         for label, fasta, gff in (args.genome or [])
     ]
     try:
@@ -518,10 +780,22 @@ def _main_compare(arguments: list[str]) -> int:
         requested_labels = [dataset.label for dataset in datasets] + (args.references or [])
         if len(requested_labels) != len(set(requested_labels)):
             parser.error("comparison genome labels and references must be unique")
+        unknown_overrides = sorted(set(code_overrides) - set(requested_labels))
+        if unknown_overrides:
+            parser.error(
+                "--genetic-code label does not match an input: "
+                + ", ".join(unknown_overrides)
+            )
         if args.references:
             fetched = fetch_genomes(args.references, args.output / "external_inputs")
             datasets.extend(
-                GenomeInput(item.accession, item.fasta, item.gff, item.metadata)
+                GenomeInput(
+                    item.accession,
+                    item.fasta,
+                    item.gff,
+                    item.metadata,
+                    code_overrides.get(item.accession),
+                )
                 for item in fetched
             )
         if not args.quiet:

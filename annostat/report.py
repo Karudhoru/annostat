@@ -5,6 +5,8 @@ from __future__ import annotations
 from html import escape
 from pathlib import Path
 
+from annostat.sequences import recognized_start_codons
+
 
 def _percentage(part: int, whole: int) -> str:
     """Format a part-to-whole ratio as a percentage, including zero totals."""
@@ -46,8 +48,10 @@ def render_html_report(
     hypothetical = int(summary["hypothetical_cds_count"])
     cog_annotated = int(summary["cds_with_cog_count"])
     start_counts = summary["start_codon_counts"]
-    standard_starts = sum(start_counts.get(codon, 0) for codon in ("ATG", "GTG", "TTG"))
+    recognized_codons = recognized_start_codons(int(summary["genetic_code"]))
+    recognized_starts = sum(start_counts.get(codon, 0) for codon in recognized_codons)
     quality = summary["quality_control"]
+    validation = summary["validation"]
     filtered_export = summary["filtered_export"]
     input_files = summary["input_files"]
     performance = summary["performance"]
@@ -71,7 +75,11 @@ def render_html_report(
             _metric("Genome size", f'{int(summary["genome_length"]):,} bp', f'{len(summary["sequence_ids"]):,} sequence records'),
             _metric("Features", f'{int(summary["total_features"]):,}', f'{cds_count:,} coding sequences'),
             cog_coverage,
-            _metric("Recognized starts", _percentage(standard_starts, cds_count), f'{standard_starts:,} ATG/GTG/TTG'),
+            _metric(
+                "Recognized starts",
+                _percentage(recognized_starts, cds_count),
+                f'{recognized_starts:,} valid initiators for table {summary["genetic_code"]}',
+            ),
             _metric("Genome GC", f'{quality["genome_gc_percent"]:.2f}%', "whole-genome composition"),
             _metric("Coding density", f'{quality["coding_density_percent"]:.2f}%', "non-duplicated CDS coverage"),
         )
@@ -80,6 +88,9 @@ def render_html_report(
         f"<tr><td>{escape(issue.replace('_', ' ').title())}</td><td>{count:,}</td></tr>"
         for issue, count in quality["issue_counts"].items()
     ) or "<tr><td>No findings</td><td>0</td></tr>"
+    validation_counts = validation["severity_counts"]
+    validation_status = "Pass" if validation["valid"] else "Fail"
+    validation_hashes = validation.get("input_sha256", {})
     filter_panel = ""
     if filtered_export["active"]:
         criteria = []
@@ -145,9 +156,18 @@ table{{width:100%;border-collapse:collapse}} td{{border-bottom:1px solid var(--l
 <section class="figures">{figures}</section>
 <section class="summary-grid">
   <article class="panel"><h2>Annotation quality findings</h2><table>{quality_rows}<tr><td>Total findings</td><td>{quality["finding_count"]:,}</td></tr></table><p class="metric-note">Findings are conservative review candidates, not automatic biological errors.</p></article>
+  <article class="panel"><h2>Structural validation</h2><dl>
+    <dt>Status</dt><dd>{validation_status}</dd>
+    <dt>Errors</dt><dd>{int(validation_counts["error"]):,}</dd>
+    <dt>Warnings</dt><dd>{int(validation_counts["warning"]):,}</dd>
+    <dt>Ruleset</dt><dd>{escape(str(validation["ruleset_version"]))}</dd>
+    <dt>FASTA SHA-256</dt><dd>{escape(str(validation_hashes.get("fasta", "not available")))}</dd>
+    <dt>GFF3 SHA-256</dt><dd>{escape(str(validation_hashes.get("gff3", "not available")))}</dd>
+    <dt>Scientific fingerprint</dt><dd>{escape(str(summary["scientific_fingerprint"]))}</dd>
+  </dl><p class="metric-note">Validation covers deterministic file integrity. Biological findings remain review candidates.</p></article>
   <article class="panel"><h2>Performance</h2><table>{stage_rows}<tr><td>Total measured stages</td><td>{performance["total_seconds"]:.4f} s</td></tr><tr><td>Peak Python memory</td><td>{escape(peak_memory_text)}</td></tr></table></article>
   <article class="panel"><h2>Methods and provenance</h2><dl>
-    <dt>Translation table</dt><dd>NCBI bacterial genetic code 11</dd>
+    <dt>Translation table</dt><dd>NCBI genetic code {int(summary["genetic_code"])} ({escape(str(summary["genetic_code_source"]).replace("_", " "))})</dd>
     <dt>FASTA</dt><dd>{escape(str(input_files["fasta"]))}</dd>
     <dt>GFF3</dt><dd>{escape(str(input_files["gff3"]))}</dd>
     <dt>Codon calculation</dt><dd>Pooled across complete CDS codons</dd>

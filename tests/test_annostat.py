@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from annostat.analysis import analyze_codons, analyze_features, cog_categories
 from annostat.cli import run_analysis
-from annostat.comparison import GenomeInput, _species_name, run_comparison
+from annostat.comparison import GenomeInput, _gff_metadata, _species_name, run_comparison
 from annostat.filtering import CdsFilter
 from annostat.models import Feature
 from annostat.ncbi import _safe_extract, fetch_genomes
@@ -126,6 +126,25 @@ class AnnostatTests(unittest.TestCase):
 
         self.assertEqual(summary["total_features"], 1)
         self.assertEqual(summary["cds_count"], 1)
+
+    def test_anonymous_duplicate_rows_remain_distinct_cds_features(self) -> None:
+        features = [
+            Feature("chr", "test", "CDS", 1, 9, None, "+", 0, {}),
+            Feature("chr", "test", "CDS", 1, 9, None, "+", 0, {}),
+        ]
+
+        summary = analyze_features(features)
+        records = extract_cds_sequences(features, {"chr": "ATGAAATAA"})
+        quality = quality_summary(
+            features,
+            {"chr": "ATGAAATAA"},
+            frozenset(),
+            [],
+        )
+
+        self.assertEqual(summary["cds_count"], 2)
+        self.assertEqual(len(records), 2)
+        self.assertAlmostEqual(quality["cds_per_kb"], 2000 / 9)
 
     def test_cds_filter_combines_all_enabled_criteria(self) -> None:
         cds_filter = CdsFilter(
@@ -256,6 +275,7 @@ class AnnostatTests(unittest.TestCase):
                 "plots/cds_lengths.svg", "plots/start_codons.svg",
                 "tables/annotation_issues.csv", "filtered/features.tsv",
                 "filtered/cds_nucleotide.fasta", "filtered/cds_protein.fasta",
+                "validation/validation.json", "validation/validation.tsv",
             }
             self.assertEqual(
                 {path.relative_to(output).as_posix() for path in output.rglob("*") if path.is_file()},
@@ -276,9 +296,10 @@ class AnnostatTests(unittest.TestCase):
             written_summary = json.loads((output / "summary.json").read_text())
             self.assertEqual(written_summary["cds_count"], 1)
             self.assertRegex(written_summary["annostat_version"], r"^\d+\.\d+\.\d+$")
+            self.assertRegex(written_summary["scientific_fingerprint"], r"^[0-9a-f]{64}$")
             self.assertEqual(written_summary["input_files"]["fasta"], str(fasta))
             self.assertEqual(written_summary["top_codons"][0]["codon"], "ATG")
-            self.assertEqual(len(written_summary["output_files"]), 15)
+            self.assertEqual(len(written_summary["output_files"]), 17)
             self.assertEqual(written_summary["filtered_export"]["selected_cds_count"], 1)
             self.assertIn("coding_density_percent", written_summary["quality_control"])
             self.assertIn("stage_seconds", written_summary["performance"])
@@ -288,6 +309,7 @@ class AnnostatTests(unittest.TestCase):
             self.assertIn("Bacterial annotation report", report)
             self.assertIn("Most-used codons", report)
             self.assertIn("Annotation quality findings", report)
+            self.assertIn("Structural validation", report)
             self.assertIn("Filtered CDS export", report)
             self.assertIn("Report Generation", report)
             self.assertNotIn("<script", report)
@@ -314,6 +336,36 @@ class AnnostatTests(unittest.TestCase):
             self.assertNotIn("<script>alert(1)</script>", escaped_report)
             self.assertIn("unsafe&amp;annotation.gff3", escaped_report)
 
+    def test_reused_output_directory_removes_only_stale_generated_variants(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fasta = root / "genome.fna"
+            gff = root / "genes.gff3"
+            output = root / "results"
+            fasta.write_text(">chr\nATGAAATAA\n", encoding="utf-8")
+            gff.write_text(
+                "##gff-version 3\n"
+                "chr\ttest\tCDS\t1\t9\t.\t+\t0\tID=cds1;Dbxref=COG:J\n",
+                encoding="utf-8",
+            )
+
+            run_analysis(
+                fasta,
+                gff,
+                output,
+                "csv",
+                cds_filter=CdsFilter(require_cog=True),
+            )
+            user_file = output / "filtered" / "researcher-notes.txt"
+            user_file.write_text("preserve", encoding="utf-8")
+            run_analysis(fasta, gff, output, "tsv")
+
+            self.assertTrue((output / "tables" / "features.tsv").is_file())
+            self.assertFalse((output / "tables" / "features.csv").exists())
+            self.assertFalse((output / "filtered" / "features.csv").exists())
+            self.assertFalse((output / "filtered" / "cds_protein.fasta").exists())
+            self.assertEqual(user_file.read_text(encoding="utf-8"), "preserve")
+
     def test_single_report_treats_missing_cog_annotations_as_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -334,6 +386,59 @@ class AnnostatTests(unittest.TestCase):
             report = (output / "report.html").read_text(encoding="utf-8")
             self.assertIn("Not available", report)
             self.assertEqual(report.count("<svg "), 2)
+
+    def test_inspection_automatically_uses_declared_translation_table(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fasta = root / "genome.fna"
+            gff = root / "genes.gff3"
+            output = root / "results"
+            fasta.write_text(">chr\nATGTGATAA\n", encoding="utf-8")
+            gff.write_text(
+                "##gff-version 3\n"
+                "chr\ttest\tCDS\t1\t9\t.\t+\t0\t"
+                "ID=cds1;product=test;transl_table=25\n",
+                encoding="utf-8",
+            )
+
+            summary = run_analysis(fasta, gff, output, "csv")
+
+            self.assertEqual(summary["genetic_code"], 25)
+            self.assertEqual(summary["genetic_code_source"], "gff3")
+            self.assertIn(
+                "MG",
+                (output / "sequences" / "cds_protein.fasta").read_text(encoding="utf-8"),
+            )
+            self.assertNotIn(
+                "internal_stop_codon",
+                summary["quality_control"]["issue_counts"],
+            )
+            with self.assertRaisesRegex(ValueError, "conflicts with GFF3"):
+                run_analysis(fasta, gff, root / "conflict", "csv", genetic_code=11)
+
+    def test_report_and_plot_count_table_specific_alternative_starts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fasta = root / "genome.fna"
+            gff = root / "genes.gff3"
+            output = root / "results"
+            fasta.write_text(">chr\nATTAAATAA\n", encoding="utf-8")
+            gff.write_text(
+                "##gff-version 3\n"
+                "chr\ttest\tCDS\t1\t9\t.\t+\t0\tID=cds1;product=test\n",
+                encoding="utf-8",
+            )
+
+            run_analysis(fasta, gff, output, "csv")
+            report = (output / "report.html").read_text(encoding="utf-8")
+            start_plot = (output / "plots" / "start_codons.svg").read_text(
+                encoding="utf-8"
+            )
+
+            self.assertIn("100.00%", report)
+            self.assertIn("valid initiators for table 11", report)
+            self.assertIn("Other recognized", start_plot)
+            self.assertIn("Unrecognized", start_plot)
 
     def test_comparative_analysis_outputs_normalized_profiles(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -396,6 +501,60 @@ class AnnostatTests(unittest.TestCase):
             for plot_name in ("dataset_overview.svg", "cog_comparison.svg"):
                 ET.parse(output / "plots" / plot_name)
 
+    def test_comparison_uses_joined_lengths_and_each_genomes_translation_table(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            joined_fasta = root / "joined.fna"
+            joined_gff = root / "joined.gff3"
+            code_fasta = root / "code25.fna"
+            code_gff = root / "code25.gff3"
+            joined_fasta.write_text(">chr\nATGACCCCCAATAA\n", encoding="utf-8")
+            joined_gff.write_text(
+                "##gff-version 3\n"
+                "chr\ttest\tCDS\t1\t4\t.\t+\t0\tID=joined\n"
+                "chr\ttest\tCDS\t10\t14\t.\t+\t2\tID=joined\n",
+                encoding="utf-8",
+            )
+            code_fasta.write_text(">chr\nATGTGATAA\n", encoding="utf-8")
+            code_gff.write_text(
+                "##gff-version 3\n"
+                "chr\ttest\tCDS\t1\t9\t.\t+\t0\tID=code25;transl_table=25\n",
+                encoding="utf-8",
+            )
+
+            summary = run_comparison(
+                [
+                    GenomeInput("joined", joined_fasta, joined_gff),
+                    GenomeInput("code25", code_fasta, code_gff),
+                ],
+                root / "comparison",
+            )
+
+            profiles = {profile["label"]: profile for profile in summary["datasets"]}
+            self.assertEqual(profiles["joined"]["median_cds_length"], 9)
+            self.assertEqual(profiles["code25"]["genetic_code"], 25)
+            self.assertEqual(profiles["code25"]["genetic_code_source"], "gff3")
+            self.assertNotIn(
+                "internal_stop_codon", profiles["code25"]["qc_issue_counts"]
+            )
+            self.assertTrue(any("Translation tables differ" in item for item in summary["warnings"]))
+
+    def test_ncbi_gff_metadata_normalizes_accession_and_taxonomy_url(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            gff = Path(temporary_directory) / "annotation.gff3"
+            gff.write_text(
+                "##gff-version 3\n"
+                "#!genome-build-accession NCBI_Assembly:GCF_000005845.2\n"
+                "##species https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=511145\n"
+                "chr\ttest\tregion\t1\t9\t.\t+\t.\tID=chr\n",
+                encoding="utf-8",
+            )
+
+            metadata = _gff_metadata(gff)
+
+            self.assertEqual(metadata["assembly_accession"], "GCF_000005845.2")
+            self.assertEqual(metadata["taxonomy_id"], 511145)
+
     def test_species_names_are_not_inferred_from_placeholder_taxa(self) -> None:
         self.assertIsNone(_species_name("uncultured bacterium"))
         self.assertIsNone(_species_name("Escherichia sp. ABC"))
@@ -408,6 +567,24 @@ class AnnostatTests(unittest.TestCase):
             run_comparison([missing], Path("unused"))
         with self.assertRaisesRegex(ValueError, "unique"):
             run_comparison([missing, missing], Path("unused"))
+
+    def test_comparison_rejects_structurally_invalid_annotations(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            datasets = []
+            for label, end in (("valid", 9), ("invalid", 12)):
+                fasta = root / f"{label}.fna"
+                gff = root / f"{label}.gff3"
+                fasta.write_text(">chr\nATGAAATAA\n", encoding="utf-8")
+                gff.write_text(
+                    "##gff-version 3\n"
+                    f"chr\ttest\tCDS\t1\t{end}\t.\t+\t0\tID={label}\n",
+                    encoding="utf-8",
+                )
+                datasets.append(GenomeInput(label, fasta, gff))
+
+            with self.assertRaisesRegex(ValueError, "failed validation"):
+                run_comparison(datasets, root / "comparison")
 
     def test_comparison_treats_missing_cog_annotations_as_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -547,6 +724,8 @@ class AnnostatTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Analyze bacterial GFF3", result.stdout)
+        for command in ("inspect", "validate", "summarize", "compare", "fetch"):
+            self.assertIn(command, result.stdout)
 
     def test_cli_exposes_comparison_and_ncbi_help(self) -> None:
         cli_path = Path(__file__).parents[1] / "annostat" / "cli.py"
@@ -562,6 +741,7 @@ class AnnostatTests(unittest.TestCase):
         self.assertEqual(comparison.returncode, 0, comparison.stderr)
         self.assertIn("--genome LABEL FASTA GFF3", comparison.stdout)
         self.assertIn("--reference GCF_OR_GCA", comparison.stdout)
+        self.assertIn("--genetic-code LABEL TABLE", comparison.stdout)
         self.assertEqual(fetch.returncode, 0, fetch.stderr)
         self.assertIn("official NCBI Datasets CLI", fetch.stdout)
 
@@ -633,7 +813,7 @@ class AnnostatTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("[1/5] Reading GFF3", result.stdout)
         self.assertIn("Analysis summary", result.stdout)
-        self.assertIn("ATG/GTG/TTG starts", result.stdout)
+        self.assertIn("Recognized starts", result.stdout)
         self.assertEqual(quiet_result.returncode, 0, quiet_result.stderr)
         self.assertEqual(quiet_result.stdout, "")
         self.assertEqual(profile_result.returncode, 0, profile_result.stderr)

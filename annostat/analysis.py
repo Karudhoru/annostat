@@ -70,7 +70,20 @@ def analyze_features(features: Iterable[Feature]) -> dict[str, object]:
     type_counts: Counter[str] = Counter()
     rna_counts: Counter[str] = Counter()
     cog_counts: Counter[str] = Counter()
-    for feature in features:
+    seen_features: set[tuple[str, str]] = set()
+    gff_row_count = 0
+    for row_index, feature in enumerate(features):
+        gff_row_count += 1
+        explicit_id = feature.attributes.get("ID")
+        identity = (
+            (feature.type, explicit_id)
+            if explicit_id
+            else ("__anonymous_row__", str(row_index))
+        )
+        if identity in seen_features:
+            # Repeated IDs are rows of one multipart GFF3 feature.
+            continue
+        seen_features.add(identity)
         total_features += 1
         type_counts[feature.type] += 1
         if feature.type.lower().endswith("rna"):
@@ -88,6 +101,7 @@ def analyze_features(features: Iterable[Feature]) -> dict[str, object]:
 
     return {
         "total_features": total_features,
+        "gff_row_count": gff_row_count,
         "cds_count": cds_count,
         "rna_counts": dict(sorted(rna_counts.items())),
         "feature_type_counts": dict(sorted(type_counts.items())),

@@ -6,39 +6,62 @@ and command-line executable retain the lowercase technical name `annostat`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Changed
-
-- Standardized the user-facing product name as **Annostat** across terminal
-  banners, HTML reports, SVG figures, and documentation while retaining the
-  lowercase `annostat` command and Python package.
-- Reorganized the README with required versus optional components, explicit
-  assignment deliverables, and a step-by-step installation and usage guide.
-
-### Fixed
-
-- Single-genome CLI and HTML output now report absent COG annotations as
-  unavailable and omit stale or empty COG plots.
-- HTML and JSON performance sections now use the same measured stage timings.
-- Circular-origin CDS intervals now participate correctly in overlap detection
-  and non-duplicated coding-density calculations.
-- CDS-length histogram mean and median markers now reach the exact maximum of
-  the plotted coordinate scale.
-- Multi-genome overview labels use non-overlapping rows, and long plot labels
-  are shortened visually while retaining full SVG tooltips.
-- Placeholder organism labels such as `uncultured bacterium` and `Genus sp.` no
-  longer produce guessed species relationships.
+## [1.0.0]
 
 ### Added
 
-- NCBI assembly links and direct SVG download links in comparative HTML reports.
-- Documentation of GFF3/FASTA assumptions, circular coordinates, COG
-  availability, and the current multi-part CDS limitation.
-- Regression coverage for missing single-genome COG data, circular-origin QC,
-  conservative species parsing, report timings, and stricter GFF3 fields.
+- Separate `annostat validate` and `annostat inspect` workflows so deterministic
+  structural failures are not conflated with context-dependent biological review
+  findings.
+- Versioned validation rules with stable identifiers, scientific rationale,
+  source URLs, canonical JSON/TSV output, input SHA-256 hashes, and reproducible
+  scientific fingerprints.
+- `annostat summarize` for MultiQC-style aggregation of completed inspections
+  into deterministic cohort HTML, TSV, and JSON reports.
+- Correct biological joining and phase validation for multipart CDS features on
+  both strands.
+- Translation tables 4, 11, and 25 with annotation-aware selection from GFF3
+  `transl_table` attributes and safe table-11 fallback.
+- Position-specific `transl_except` support for selenocysteine, pyrrolysine,
+  termination, and conservative `OTHER`-to-`X` translation.
+- A top-level command overview for `annostat --help` while retaining the legacy
+  `annostat -f ... -g ...` inspection form.
+- Per-genome `--genetic-code LABEL TABLE` overrides for comparative analysis.
 
-## [0.5.0] - 2026-08-07
+### Changed
+
+- Inspection and comparison now reject explicit genetic-code selections that
+  conflict with a translation table declared by the annotation.
+- Start-codon metrics use every initiator recognized by the selected NCBI table,
+  rather than counting only ATG, GTG, and TTG.
+- Comparison reports retain the selected genetic code and its provenance for
+  every dataset.
+
+### Fixed
+
+- Alternative initiator codons are converted to methionine only for CDS records
+  with a complete 5-prime boundary; partial N-termini preserve the ordinary codon
+  translation.
+- Terminal `transl_except` residues are retained after normal stop-codon trimming.
+- Translation-table selection now reads NCBI `region` declarations as well as CDS
+  declarations.
+- Anonymous CDS rows remain distinct in feature and CDS-density counts, while
+  repeated explicit IDs are still joined as multipart features.
+- Partial-feature QC suppresses only the affected biological boundary check.
+- Comparative analysis now performs structural validation before calculating any
+  scientific profiles.
+- Reusing an output directory removes obsolete Annostat table/filter variants
+  without deleting unrelated user files.
+- Circular features may extend their end into virtual origin-spanning coordinates,
+  but their start must remain within the real sequence coordinate range.
+- Multipart CDS median lengths in comparative reports now use the complete
+  joined biological feature rather than the first GFF3 segment.
+- NCBI assembly accessions prefixed with `NCBI_Assembly:` and taxonomy URLs using
+  `wwwtax.cgi?id=` are normalized for report metadata and links.
+- Table-25 annotations no longer generate false internal-stop warnings or
+  incorrect proteins when no manual CLI option is supplied.
+
+## [0.5.0]
 
 ### Added
 
@@ -82,7 +105,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Annostat does not implement approximate ANI, phylogeny, or homolog clustering;
   those analyses remain delegated to specialized tools.
 
-## [0.4.0] - 2026-08-07
+## [0.4.0]
 
 ### Added
 
@@ -107,7 +130,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   filter criteria without adding another default plot.
 - Updated the package version to 0.4.0.
 
-## [0.3.0] - 2026-08-07
+## [0.3.0]
 
 ### Added
 
@@ -146,7 +169,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - All six table and FASTA outputs shared with version 0.2.0 remain byte-for-byte
   identical for both supplied datasets.
 
-## [0.2.0] - 2026-08-07
+## [0.2.0]
 
 ### Added
 
@@ -180,7 +203,7 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The additional reporting and visualizations introduce no measurable runtime
   regression in the project benchmark.
 
-## [0.1.0] - 2026-08-07
+## [0.1.0]
 
 ### Added
 

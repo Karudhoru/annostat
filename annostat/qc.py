@@ -18,6 +18,16 @@ _STANDARD_TRNA_AMINO_ACIDS = frozenset(
     }
 )
 _TRNA_PATTERN = re.compile(r"tRNA-([A-Za-z]{3})", re.IGNORECASE)
+_START_CODONS = {
+    4: frozenset({"TTA", "TTG", "CTG", "ATT", "ATC", "ATA", "ATG", "GTG"}),
+    11: frozenset({"TTG", "CTG", "ATT", "ATC", "ATA", "ATG", "GTG"}),
+    25: frozenset({"TTG", "ATG", "GTG"}),
+}
+_STOP_CODONS = {
+    4: frozenset({"TAA", "TAG"}),
+    11: frozenset({"TAA", "TAG", "TGA"}),
+    25: frozenset({"TAA", "TAG"}),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +73,28 @@ def _is_partial(feature: Feature) -> bool:
         _attribute_is_true(feature, "partial")
         or "start_range" in feature.attributes
         or "end_range" in feature.attributes
+    )
+
+
+def _is_five_prime_partial(feature: Feature) -> bool:
+    """Return whether the biological CDS start is explicitly incomplete."""
+
+    boundary = "end_range" if feature.strand == "-" else "start_range"
+    if boundary in feature.attributes:
+        return True
+    return _attribute_is_true(feature, "partial") and not (
+        {"start_range", "end_range"} & feature.attributes.keys()
+    )
+
+
+def _is_three_prime_partial(feature: Feature) -> bool:
+    """Return whether the biological CDS end is explicitly incomplete."""
+
+    boundary = "start_range" if feature.strand == "-" else "end_range"
+    if boundary in feature.attributes:
+        return True
+    return _attribute_is_true(feature, "partial") and not (
+        {"start_range", "end_range"} & feature.attributes.keys()
     )
 
 
@@ -292,12 +324,48 @@ def feature_quality_findings(
     return findings
 
 
-def sequence_quality_findings(record: CdsSequence) -> list[AnnotationIssue]:
-    """Return frame, internal-stop, and ambiguous-base findings for one CDS."""
+def sequence_quality_findings(
+    record: CdsSequence,
+    genetic_code: int = 11,
+    *,
+    sequence_length: int | None = None,
+    circular: bool = False,
+) -> list[AnnotationIssue]:
+    """Return conservative sequence-level review findings for one CDS.
 
+    Explicit partial, pseudo, translational-exception, and ribosomal-slippage
+    annotations suppress checks whose assumptions no longer hold.
+    """
+
+    if genetic_code not in _START_CODONS:
+        raise ValueError(f"unsupported NCBI genetic code {genetic_code}; choose 4, 11, or 25")
     findings: list[AnnotationIssue] = []
     coding_sequence = record.coding_nucleotide.upper()
-    if len(coding_sequence) % 3:
+    partial = _is_partial(record.feature)
+    five_prime_partial = _is_five_prime_partial(record.feature)
+    three_prime_partial = _is_three_prime_partial(record.feature)
+    pseudo = _is_pseudogene(record.feature)
+    translation_exception = bool(record.feature.attributes.get("transl_except"))
+    biological_exception = translation_exception or bool(
+        record.feature.attributes.get("exception")
+    )
+    segments = record.segments or (record.feature,)
+    near_left_boundary = (
+        sequence_length is not None and min(segment.start for segment in segments) <= 3
+    )
+    near_right_boundary = (
+        sequence_length is not None
+        and max(segment.end for segment in segments) >= sequence_length - 2
+    )
+    five_prime_boundary = not circular and (
+        near_left_boundary if record.feature.strand != "-" else near_right_boundary
+    )
+    three_prime_boundary = not circular and (
+        near_right_boundary if record.feature.strand != "-" else near_left_boundary
+    )
+    if len(coding_sequence) % 3 and not (
+        partial or pseudo or biological_exception or five_prime_boundary or three_prime_boundary
+    ):
         findings.append(
             _finding_for_feature(
                 "non_triplet_cds",
@@ -306,13 +374,45 @@ def sequence_quality_findings(record: CdsSequence) -> list[AnnotationIssue]:
                 f"coding length {len(coding_sequence)} is not divisible by three",
             )
         )
-    if "*" in record.protein:
+    exception_indices = set(record.translation_exception_indices)
+    unexplained_internal_stop = any(
+        amino_acid == "*" and index not in exception_indices
+        for index, amino_acid in enumerate(record.protein)
+    )
+    if unexplained_internal_stop and not pseudo:
         findings.append(
             _finding_for_feature(
                 "internal_stop_codon",
                 "warning",
                 record.feature,
                 "translated CDS contains an internal stop codon",
+            )
+        )
+    if (
+        len(coding_sequence) >= 3
+        and coding_sequence[:3] not in _START_CODONS[genetic_code]
+        and not (five_prime_partial or pseudo or biological_exception or five_prime_boundary)
+    ):
+        findings.append(
+            _finding_for_feature(
+                "unrecognized_start_codon",
+                "warning",
+                record.feature,
+                f"complete CDS begins with {coding_sequence[:3]}",
+            )
+        )
+    if (
+        len(coding_sequence) >= 3
+        and len(coding_sequence) % 3 == 0
+        and coding_sequence[-3:] not in _STOP_CODONS[genetic_code]
+        and not (three_prime_partial or pseudo or biological_exception or three_prime_boundary)
+    ):
+        findings.append(
+            _finding_for_feature(
+                "missing_stop_codon",
+                "warning",
+                record.feature,
+                f"complete CDS ends with {coding_sequence[-3:]}, not a stop codon",
             )
         )
     ambiguous_bases = sum(base not in "ACGT" for base in coding_sequence)
@@ -375,7 +475,17 @@ def quality_summary(
     finding_list = list(findings)
     genome_length = sum(map(len, genome.values()))
     gc_bases = sum(sequence.count("G") + sequence.count("C") for sequence in genome.values())
-    cds_count = sum(feature.type == "CDS" for feature in feature_list)
+    explicit_cds_ids: set[str] = set()
+    anonymous_cds_count = 0
+    for feature in feature_list:
+        if feature.type != "CDS":
+            continue
+        explicit_id = feature.attributes.get("ID")
+        if explicit_id:
+            explicit_cds_ids.add(explicit_id)
+        else:
+            anonymous_cds_count += 1
+    cds_count = len(explicit_cds_ids) + anonymous_cds_count
     covered_bases = _covered_bases(feature_list, genome, circular_seqids)
     issue_counts = Counter(finding.issue_type for finding in finding_list)
     severity_counts = Counter(finding.severity for finding in finding_list)
