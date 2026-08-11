@@ -18,7 +18,8 @@ Python standard library and supports multi-record FASTA files.
   hypothetical-protein status without changing the complete analysis
 - Builds a self-contained offline HTML report with provenance and performance timings
 - Saves three focused, dependency-free SVG charts for COG categories, CDS lengths,
-  and start codons; the COG chart is omitted when the source has no COG data
+  and table-aware start codons; the COG chart is omitted when the source has no
+  COG data
 - Streams CDS processing and FASTA generation to reduce runtime and peak memory
 - Compares two or more local or NCBI-hosted annotations using normalized genome,
   annotation-completeness, COG, start-codon, and QC profiles
@@ -26,6 +27,19 @@ Python standard library and supports multi-record FASTA files.
   overlap without presenting annotation labels as inferred orthologs
 - Downloads versioned RefSeq or GenBank assemblies through the official NCBI
   Datasets command-line tool when network connectivity is requested
+- Separates deterministic FASTA/GFF3 validation from biological inspection, with
+  stable rule IDs, severity levels, schema/ruleset versions, and source citations
+- Records SHA-256 hashes for reproducibility and writes canonical JSON plus TSV
+  validation results suitable for CI pipelines
+- Correctly joins repeated-ID multipart CDS features in biological order on both
+  strands and validates phase continuity before translation
+- Supports NCBI prokaryotic translation tables 4, 11, and 25, automatically
+  selecting a consistent CDS or `region` `transl_table` declaration when present
+- Applies position-specific NCBI `transl_except` annotations for selenocysteine,
+  pyrrolysine, explicitly annotated termination codons, and `OTHER` residues
+  represented conservatively as `X`
+- Aggregates completed inspections into a script-free cohort HTML report,
+  normalized TSV matrix, and machine-readable JSON
 
 ## Required and optional components
 
@@ -67,11 +81,16 @@ analysis, and NCBI connectivity are additional features beyond the core requirem
 - CDS strand and phase are honored. Circular-origin CDS coordinates extending past
   the sequence length are supported when a `region` feature declares
   `Is_circular=true`.
-- A CDS split across multiple GFF3 rows is currently analyzed as multiple rows; this
-  is appropriate for the supplied bacterial annotations but should be considered
-  before using eukaryotic or heavily fragmented gene models.
+- Repeated CDS IDs are interpreted as one multipart biological feature. Segments
+  must use the same sequence ID, strand, and Parent; phase continuity is checked,
+  and segments are joined in biological order before translation.
 - COG coverage describes categories actually present in the annotation source. An
   annotation with no COG category fields is reported as unavailable, not as 0%.
+- Annostat uses the consistent CDS or `region` `transl_table` declared in GFF3.
+  When the annotation declares no table, it falls back to bacterial table 11. `--genetic-code` is an
+  explicit override for annotations without that metadata; an override that
+  conflicts with a declared table is rejected instead of silently mistranslating
+  CDS features. Annostat never guesses a genetic code from sequence composition.
 
 ## Installation
 
@@ -149,17 +168,42 @@ Confirm that you have one genome FASTA and its matching GFF3 annotation. Sequenc
 IDs must agree—for example, a FASTA record named `chromosome` must be referenced
 as `chromosome` in the first GFF3 column.
 
-### 6. Run a complete single-genome analysis
+### 6. Validate the paired files
+
+Run deterministic integrity checks before biological interpretation:
 
 ```bash
-annostat -f data/GCF_000007145.1.fna -g data/GCF_000007145.1.gff3 -o results
+annostat validate \
+  -f data/GCF_000007145.1.fna \
+  -g data/GCF_000007145.1.gff3 \
+  -o validation
+```
+
+The command writes `validation.json` and `validation.tsv`. Exit status `0` means
+no structural errors were found; status `1` means the configured threshold was
+reached. Use `--fail-on warning` for strict CI, or `--fail-on never` when the
+report should never stop a pipeline. A validation pass means the paired files are
+internally interpretable; it does not prove that every biological annotation is
+correct.
+
+### 7. Inspect one annotation
+
+```bash
+annostat inspect \
+  -f data/GCF_000007145.1.fna \
+  -g data/GCF_000007145.1.gff3 \
+  -o results
 ```
 
 Here `-f` selects the required FASTA, `-g` selects the required GFF3, and `-o`
 chooses the output directory. Add `--table-format tsv` when a TSV overview is
-preferred over CSV.
+preferred over CSV. The original command without the `inspect` word remains a
+backward-compatible alias. Translation-table selection is automatic when the
+GFF3 CDS or `region` rows contain `transl_table`; otherwise table 11 is used. For a local
+annotation without that attribute, select a supported table explicitly with
+`--genetic-code 4`, `--genetic-code 11`, or `--genetic-code 25`.
 
-### 7. Inspect the results
+### 8. Review the result package
 
 Open `results/report.html` in a browser first. Then use:
 
@@ -168,7 +212,21 @@ Open `results/report.html` in a browser first. Then use:
 - `sequences/` for nucleotide and protein CDS FASTA files; and
 - `plots/` for editable SVG figures.
 
-### 8. Use optional features
+### 9. Summarize a cohort
+
+After inspecting several genomes into separate result directories, aggregate the
+entire parent directory:
+
+```bash
+annostat summarize results/batch -o cohort
+```
+
+The output contains `cohort.html`, `cohort.tsv`, and `cohort.json`. Samples are
+ordered deterministically. Missing source-dependent values such as COG coverage
+remain `NA`/`null`, never biological zero. Multiple source Annostat versions are
+retained and flagged in the report.
+
+### 10. Use optional features
 
 The following sections show filtered exports, comparative analysis, NCBI
 references, performance profiling, and complete output descriptions.
@@ -205,6 +263,19 @@ Compare two or more labelled local genomes with repeatable `--genome` options:
 annostat compare \
   --genome genome-a data/GCF_000007145.1.fna data/GCF_000007145.1.gff3 \
   --genome genome-b data/GCF_001050915.2.fna data/GCF_001050915.2.gff3 \
+  --output comparison
+```
+
+Each genome is structurally validated and independently uses its declared
+`transl_table` or the table-11 fallback. For an annotation without
+`transl_table`, a per-genome override uses
+the same label supplied to `--genome` (or the reference accession):
+
+```bash
+annostat compare \
+  --genome sr1 sr1.fna sr1.gff3 \
+  --genome ecoli ecoli.fna ecoli.gff3 \
+  --genetic-code sr1 25 \
   --output comparison
 ```
 
@@ -294,6 +365,9 @@ results/
 │   ├── start_codons.csv
 │   ├── cog_categories.csv
 │   └── annotation_issues.csv
+├── validation/
+│   ├── validation.json
+│   └── validation.tsv
 ├── sequences/
 │   ├── cds_nucleotide.fasta
 │   └── cds_protein.fasta
@@ -317,6 +391,31 @@ overlaps and adjacent duplicate labels are informational. Containment, incomplet
 frames, missing structural RNA classes, internal stops, and ambiguous bases are
 reported as warnings that merit inspection in their biological context.
 
+## Validation versus inspection
+
+`annostat validate` answers whether the files can be interpreted consistently:
+GFF3 syntax, FASTA symbols, matching sequence IDs, coordinate bounds, Parent/ID
+relationships, multipart-feature consistency, CDS phase continuity, and valid,
+consistent CDS translation-table declarations. These checks are deterministic
+and may safely control a CI exit status.
+
+`annostat inspect` first requires structural validation to pass, then reports
+biological review candidates such as internal stops, missing terminal codons,
+ambiguous CDS bases, overlaps, partial features, pseudogenes, duplicated adjacent
+labels, and structural-RNA coverage. These findings are context-dependent and do
+not automatically make an annotation invalid. Boundary-specific partial markers
+suppress only the affected start- or stop-codon assumption. Explicit `pseudo`,
+`transl_except`, and `exception` annotations suppress checks whose assumptions do
+not apply.
+
+Every validation result embeds its rule definitions, rationale, source URL,
+ruleset version, schema version, Annostat version, and input SHA-256 hashes. JSON
+and TSV findings use canonical ordering and contain no timestamp, so repeated runs
+on identical paths and bytes produce byte-identical validation artifacts. A
+`scientific_fingerprint` in both validation and inspection JSON excludes file
+paths and performance timings, allowing scientific results to be compared across
+machines and output directories.
+
 ## Testing and verification
 
 Run compilation and all automated tests with the interpreter used to install
@@ -332,7 +431,7 @@ For a final end-to-end check, analyze one supplied genome and confirm that
 plots are created:
 
 ```bash
-annostat \
+annostat inspect \
   -f data/GCF_000007145.1.fna \
   -g data/GCF_000007145.1.gff3 \
   -o results \
@@ -342,7 +441,7 @@ annostat \
 ## Example run
 
 ```bash
-annostat \
+annostat inspect \
   -f data/GCF_000007145.1.fna \
   -g data/GCF_000007145.1.gff3 \
   -o results \
@@ -352,7 +451,7 @@ annostat \
 Example output:
 
 ```text
-Annostat 0.5.0 | bacterial genome annotation analysis
+Annostat 1.0.0 | bacterial genome annotation analysis
 FASTA: /path/to/annostat/data/GCF_000007145.1.fna
 GFF3:  /path/to/annostat/data/GCF_000007145.1.gff3
 
@@ -373,11 +472,11 @@ Analysis summary
   Coding density                                 85.33%
   Hypothetical CDS                         619 (14.41%)
   COG-annotated CDS                      2,881 (67.08%)
-  ATG/GTG/TTG starts                     4,294 (99.98%)
+  Recognized starts                      4,294 (99.98%)
   QC review                1 warning, 872 informational findings
 --------------------------------------------------------
   Output                   /path/to/annostat/results
-  Files written            12
+  Files written            14
   Completed in             0.56 seconds
 ```
 
@@ -392,6 +491,9 @@ The QC checks follow the internal-consistency emphasis of the
 [NCBI Prokaryotic Genome Annotation Standards](https://www.ncbi.nlm.nih.gov/refseq/annotation_prok/standards/)
 and the attribute conventions in the
 [NCBI GFF3 documentation](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/reference-docs/file-formats/annotation-files/about-ncbi-gff3/).
+FASTA validation accepts the NCBI/IUPAC nucleotide alphabet, and translation
+tables and initiator codons follow the
+[NCBI Genetic Codes](https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi).
 The report treats overlaps as review candidates because overlapping genes are
 common in compact bacterial genomes. Translation uses the bacterial code and
 alternative-start behavior described by
