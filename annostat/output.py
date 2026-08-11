@@ -14,7 +14,7 @@ from annostat.qc import AnnotationIssue
 
 
 def write_overview(path: Path, features: Iterable[Feature], delimiter: str) -> None:
-    """Write the assignment's compact CSV or TSV feature overview.
+    """Write the compact CSV or TSV feature overview.
 
     Missing ID, gene, and product attributes are deliberately written as empty
     fields instead of placeholder text.
