@@ -92,50 +92,14 @@ analysis, cohort summaries, and NCBI connectivity extend the core workflow.
 
 ## Installation
 
-For development, install Annostat in editable mode from the repository root:
-
-```bash
-python -m pip install -e .
-annostat --version
-```
-
-Editable mode keeps the `annostat` command connected to this checkout, so source
-changes take effect without reinstalling. If Bash has cached command locations,
-run `hash -r` once after installation.
-
-For a regular installation that copies the current version into the active Python
-environment, use:
-
-```bash
-python -m pip install .
-```
-
-## Step-by-step guide
-
-### 1. Open the repository
-
-Run all setup commands from the directory containing `pyproject.toml`:
-
-```bash
-cd /path/to/annostat
-```
-
-### 2. Select one Python installation
-
-Use the same interpreter for installation, testing, and execution. On Linux or
-WSL this is commonly `python3`; on Windows it may be `python` or `py -3`:
-
-```bash
-python3 --version
-```
-
-The reported version must be Python 3.10 or newer.
-
-### 3. Create and activate a virtual environment
+Annostat requires Python 3.10 or newer and has no third-party runtime
+dependencies. Clone the repository and create an isolated environment.
 
 Linux or WSL:
 
 ```bash
+git clone https://github.com/Karudhoru/annostat.git
+cd annostat
 python3 -m venv .venv
 source .venv/bin/activate
 ```
@@ -143,30 +107,39 @@ source .venv/bin/activate
 Windows PowerShell:
 
 ```powershell
+git clone https://github.com/Karudhoru/annostat.git
+Set-Location annostat
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-### 4. Install Annostat
-
-Editable installation is recommended while developing:
+Install the current release from the checkout and verify the executable:
 
 ```bash
-python -m pip install -e .
+python -m pip install .
 annostat --version
 annostat --help
 ```
 
-The expected version banner begins with `Annostat`. If the `annostat` command is
-not found, use `python -m annostat` with the same arguments.
+Expected version output:
 
-### 5. Check the inputs
+```text
+Annostat 1.0.0
+```
+
+Contributors should use `python -m pip install -e .` so source changes take
+effect without reinstalling. If the executable is unavailable, the equivalent
+module form is `python -m annostat`.
+
+## Quick-start guide
+
+### 1. Check the inputs
 
 Confirm that you have one genome FASTA and its matching GFF3 annotation. Sequence
 IDs must agree—for example, a FASTA record named `chromosome` must be referenced
 as `chromosome` in the first GFF3 column.
 
-### 6. Validate the paired files
+### 2. Validate the paired files
 
 Run deterministic integrity checks before biological interpretation:
 
@@ -177,6 +150,16 @@ annostat validate \
   -o validation
 ```
 
+Example output for the included dataset:
+
+```text
+Annostat 1.0.0 | annotation validation PASS
+  Errors                   0
+  Warnings                 0
+  Findings                 0
+  Files written            2
+```
+
 The command writes `validation.json` and `validation.tsv`. Exit status `0` means
 no structural errors were found; status `1` means the configured threshold was
 reached. Use `--fail-on warning` for strict CI, or `--fail-on never` when the
@@ -184,24 +167,26 @@ report should never stop a pipeline. A validation pass means the paired files ar
 internally interpretable; it does not prove that every biological annotation is
 correct.
 
-### 7. Inspect one annotation
+### 3. Inspect one annotation
 
 ```bash
 annostat inspect \
   -f data/GCF_000007145.1.fna \
   -g data/GCF_000007145.1.gff3 \
-  -o results
+  -o results \
+  --table-format tsv
 ```
 
 Here `-f` selects the required FASTA, `-g` selects the required GFF3, and `-o`
 chooses the output directory. Add `--table-format tsv` when a TSV overview is
 preferred over CSV. The original command without the `inspect` word remains a
 backward-compatible alias. Translation-table selection is automatic when the
-GFF3 CDS or `region` rows contain `transl_table`; otherwise table 11 is used. For a local
-annotation without that attribute, select a supported table explicitly with
-`--genetic-code 4`, `--genetic-code 11`, or `--genetic-code 25`.
+GFF3 CDS or `region` rows contain `transl_table`; otherwise table 11 is used.
+The included example produces a 5,076,188 bp analysis with 4,295 CDS. For a local
+annotation without translation-table metadata, select a supported table explicitly
+with `--genetic-code 4`, `--genetic-code 11`, or `--genetic-code 25`.
 
-### 8. Review the result package
+### 4. Review the result package
 
 Open `results/report.html` in a browser first. Then use:
 
@@ -210,13 +195,13 @@ Open `results/report.html` in a browser first. Then use:
 - `sequences/` for nucleotide and protein CDS FASTA files; and
 - `plots/` for editable SVG figures.
 
-### 9. Summarize a cohort
+### 5. Summarize a cohort
 
-After inspecting several genomes into separate result directories, aggregate the
-entire parent directory:
+After inspecting several genomes into separate result directories, list those
+directories explicitly or pass their common parent directory:
 
 ```bash
-annostat summarize results/batch -o cohort
+annostat summarize results/sample-a results/sample-b -o cohort
 ```
 
 The output contains `cohort.html`, `cohort.tsv`, and `cohort.json`. Samples are
@@ -224,7 +209,7 @@ ordered deterministically. Missing source-dependent values such as COG coverage
 remain `NA`/`null`, never biological zero. Multiple source Annostat versions are
 retained and flagged in the report.
 
-### 10. Use optional features
+## Common workflows
 
 The following sections show filtered exports, comparative analysis, NCBI
 references, performance profiling, and complete output descriptions.
