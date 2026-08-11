@@ -30,6 +30,12 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Completed the command-specific help for validation, cohort summarization, and
+  NCBI fetching with examples, option descriptions, and exit-status guidance.
+- Replaced assignment-specific wording in active user and API documentation with
+  tool-focused language.
+- Declared the MIT license, supported Python versions, scientific audience, and
+  repository links in the installable package metadata.
 - Inspection and comparison now reject explicit genetic-code selections that
   conflict with a translation table declared by the annotation.
 - Start-codon metrics use every initiator recognized by the selected NCBI table,
@@ -39,6 +45,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Mistyped subcommands now produce a direct unknown-command error with the valid
+  choices instead of being interpreted as an incomplete legacy inspection.
 - Alternative initiator codons are converted to methionine only for CDS records
   with a complete 5-prime boundary; partial N-termini preserve the ordinary codon
   translation.

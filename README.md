@@ -53,9 +53,9 @@ files. Local analysis uses only the Python standard library and supports multi-r
 No third-party Python package is required for local analysis, report generation,
 tables, FASTA exports, or SVG plots.
 
-## Assignment-required functionality
+## Core functionality
 
-Annostat implements the required deliverables from the exercise specification:
+Annostat provides the following core analysis outputs:
 
 - Counts CDS, RNA features by type, hypothetical CDS, CDS with gene names, CDS
   with COG categories, and other feature types.
@@ -70,7 +70,7 @@ Annostat implements the required deliverables from the exercise specification:
   documented functions, classes, and methods.
 
 Filtering, quality control, HTML reports, performance profiling, comparative
-analysis, and NCBI connectivity are additional features beyond the core requirements.
+analysis, cohort summaries, and NCBI connectivity extend the core workflow.
 
 ## Input assumptions and scope
 
@@ -117,7 +117,7 @@ python -m pip install .
 Run all setup commands from the directory containing `pyproject.toml`:
 
 ```bash
-cd /path/to/exam_3
+cd /path/to/annostat
 ```
 
 ### 2. Select one Python installation
