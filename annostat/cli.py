@@ -177,9 +177,22 @@ def build_validate_parser() -> argparse.ArgumentParser:
             "Validate structural and cross-file integrity without making "
             "taxon-dependent biological claims."
         ),
+        epilog=(
+            "example:\n"
+            "  annostat validate -f genome.fna -g annotations.gff3 -o validation\n\n"
+            "Exit status 0 means the selected failure threshold was not reached; "
+            "status 1 means it was reached. JSON and TSV results are always written."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("-f", "--fasta", required=True, type=Path, metavar="FILE")
-    parser.add_argument("-g", "--gff", required=True, type=Path, metavar="FILE")
+    parser.add_argument(
+        "-f", "--fasta", required=True, type=Path, metavar="FILE",
+        help="genome FASTA file",
+    )
+    parser.add_argument(
+        "-g", "--gff", required=True, type=Path, metavar="FILE",
+        help="matching GFF3 annotation file",
+    )
     parser.add_argument(
         "-o", "--output", type=Path, default=Path("annostat_validation"), metavar="DIR",
         help="result directory (default: annostat_validation)",
@@ -188,7 +201,10 @@ def build_validate_parser() -> argparse.ArgumentParser:
         "--fail-on", choices=("error", "warning", "never"), default="error",
         help="return status 1 for this severity or above (default: error)",
     )
-    parser.add_argument("-q", "--quiet", action="store_true")
+    parser.add_argument(
+        "-q", "--quiet", action="store_true",
+        help="suppress the terminal validation summary",
+    )
     return parser
 
 
@@ -198,6 +214,12 @@ def build_summarize_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="annostat summarize",
         description="Aggregate one or more Annostat summary.json files into a cohort report.",
+        epilog=(
+            "example:\n"
+            "  annostat summarize results/sample-* -o cohort\n\n"
+            "Inputs may be individual summary.json files or directories scanned recursively."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "inputs", nargs="+", type=Path, metavar="PATH",
@@ -207,7 +229,10 @@ def build_summarize_parser() -> argparse.ArgumentParser:
         "-o", "--output", type=Path, default=Path("annostat_cohort"), metavar="DIR",
         help="result directory (default: annostat_cohort)",
     )
-    parser.add_argument("-q", "--quiet", action="store_true")
+    parser.add_argument(
+        "-q", "--quiet", action="store_true",
+        help="suppress the terminal cohort summary",
+    )
     return parser
 
 
@@ -259,8 +284,18 @@ def build_fetch_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="annostat fetch",
         description="Download annotated assemblies through the official NCBI Datasets CLI.",
+        epilog=(
+            "example:\n"
+            "  annostat fetch GCF_000007145.1 -o ncbi_data\n\n"
+            "Accessions must be versioned GCF_ or GCA_ identifiers. Existing downloaded "
+            "assemblies are reused."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("accessions", nargs="+", metavar="GCF_OR_GCA")
+    parser.add_argument(
+        "accessions", nargs="+", metavar="GCF_OR_GCA",
+        help="one or more versioned NCBI assembly accessions",
+    )
     parser.add_argument(
         "-o", "--output", type=Path, default=Path("annostat_ncbi"), metavar="DIR",
         help="extraction directory (default: annostat_ncbi)",
@@ -656,6 +691,12 @@ def main(arguments: list[str] | None = None) -> int:
         return _main_compare(command_arguments[1:])
     if command_arguments[:1] == ["fetch"]:
         return _main_fetch(command_arguments[1:])
+
+    if command_arguments and not command_arguments[0].startswith("-"):
+        build_root_parser().error(
+            f"unknown command {command_arguments[0]!r}; choose inspect, validate, "
+            "summarize, compare, or fetch"
+        )
 
     return _main_analysis(command_arguments)
 

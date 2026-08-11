@@ -745,6 +745,21 @@ class AnnostatTests(unittest.TestCase):
         self.assertEqual(fetch.returncode, 0, fetch.stderr)
         self.assertIn("official NCBI Datasets CLI", fetch.stdout)
 
+    def test_cli_rejects_unknown_commands_with_available_choices(self) -> None:
+        """A mistyped subcommand should not look like a failed legacy inspection."""
+
+        cli_path = Path(__file__).parents[1] / "annostat" / "cli.py"
+        result = subprocess.run(
+            [sys.executable, str(cli_path), "inspekt"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("unknown command 'inspekt'", result.stderr)
+        self.assertIn("inspect, validate, summarize, compare, or fetch", result.stderr)
+
     def test_cli_reports_version(self) -> None:
         cli_path = Path(__file__).parents[1] / "annostat" / "cli.py"
         result = subprocess.run(
