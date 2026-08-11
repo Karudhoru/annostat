@@ -35,14 +35,19 @@ class CdsFilter:
             )
         )
 
-    def matches(self, feature: Feature) -> bool:
-        """Return whether a CDS feature satisfies every enabled criterion."""
+    def matches(self, feature: Feature, *, length: int | None = None) -> bool:
+        """Return whether a CDS satisfies every enabled criterion.
+
+        ``length`` lets multipart callers supply the joined CDS length while
+        preserving the original single-feature API.
+        """
 
         if feature.type != "CDS":
             return False
-        if self.min_length is not None and feature.length < self.min_length:
+        observed_length = feature.length if length is None else length
+        if self.min_length is not None and observed_length < self.min_length:
             return False
-        if self.max_length is not None and feature.length > self.max_length:
+        if self.max_length is not None and observed_length > self.max_length:
             return False
         if self.require_cog and not cog_categories(feature):
             return False

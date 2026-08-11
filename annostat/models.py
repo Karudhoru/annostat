@@ -51,3 +51,11 @@ class CdsSequence:
     nucleotide: str
     coding_nucleotide: str
     protein: str
+    segments: tuple[Feature, ...] = ()
+    translation_exception_indices: tuple[int, ...] = ()
+
+    @property
+    def length(self) -> int:
+        """Return the joined nucleotide length for single- or multipart CDS."""
+
+        return len(self.nucleotide)
