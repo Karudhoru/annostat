@@ -6,6 +6,35 @@ and command-line executable retain the lowercase technical name `annostat`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1]
+
+### Added
+
+- `annostat analyze` as the canonical single-annotation workflow.
+- Installed-package CI checks for validation, analysis, cohort summarization,
+  comparison, scientific reference counts, JSON, HTML, and SVG outputs.
+- Wheel and source-distribution build, metadata, contents, and isolated-install
+  verification on every pull request.
+
+### Changed
+
+- Reorganized the README around installation, quick start, command reference,
+  outputs, interpretation, troubleshooting, and development.
+- Reduced redundant CI combinations while retaining every supported Python
+  version on Linux plus representative Windows and macOS coverage.
+- Updated package license metadata to the current SPDX-based format.
+
+### Deprecated
+
+- The option-only `annostat -f ... -g ...` form remains functional but now
+  directs users to the explicit `annostat analyze` command. `annostat inspect`
+  remains fully supported.
+
+### Fixed
+
+- Manual release runs validate that the selected tag matches the package version,
+  safely skip files already present on PyPI, and can recover GitHub asset uploads.
+
 ## [1.0.0]
 
 ### Added
