@@ -21,8 +21,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: windows-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.12"
 
     steps:
       - name: Check out repository
@@ -43,4 +48,72 @@ jobs:
         run: python -m unittest discover -v
 
       - name: Test installed command
-        run: annostat --version
+        run: |
+          annostat --version
+          annostat analyze --help
+
+  functional:
+    name: Installed CLI workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: python -m pip install .
+
+      - name: Run validation and analysis
+        run: |
+          annostat validate -f data/GCF_000007145.1.fna -g data/GCF_000007145.1.gff3 -o "$RUNNER_TEMP/validation"
+          annostat analyze -f data/GCF_000007145.1.fna -g data/GCF_000007145.1.gff3 -o "$RUNNER_TEMP/sample-a" --table-format tsv
+          annostat analyze -f data/GCF_001050915.2.fna -g data/GCF_001050915.2.gff3 -o "$RUNNER_TEMP/sample-b" --quiet
+
+      - name: Run cohort and comparison workflows
+        run: |
+          annostat summarize "$RUNNER_TEMP/sample-a" "$RUNNER_TEMP/sample-b" -o "$RUNNER_TEMP/cohort"
+          annostat compare --genome sample-a data/GCF_000007145.1.fna data/GCF_000007145.1.gff3 --genome sample-b data/GCF_001050915.2.fna data/GCF_001050915.2.gff3 -o "$RUNNER_TEMP/comparison"
+
+      - name: Verify scientific and report outputs
+        run: |
+          python -c "import json, os, pathlib; p=pathlib.Path(os.environ['RUNNER_TEMP']); s=json.loads((p/'sample-a/summary.json').read_text()); assert s['genome_length']==5076188; assert s['cds_count']==4295; assert len(s['scientific_fingerprint'])==64"
+          python -c "import json, os, pathlib; p=pathlib.Path(os.environ['RUNNER_TEMP']); assert json.loads((p/'validation/validation.json').read_text())['valid']; assert json.loads((p/'cohort/cohort.json').read_text())['sample_count']==2"
+          python -c "import os, pathlib, xml.etree.ElementTree as ET; p=pathlib.Path(os.environ['RUNNER_TEMP']); ET.parse(p/'sample-a/plots/cds_lengths.svg'); assert '<html' in (p/'sample-a/report.html').read_text().lower(); assert (p/'comparison/comparison.json').is_file()"
+
+  package:
+    name: Build and install distributions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build and check distributions
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Install and test the wheel in isolation
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-test"
+          "$RUNNER_TEMP/wheel-test/bin/python" -m pip install --no-index dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wheel-test/bin/annostat" --version
+          "$RUNNER_TEMP/wheel-test/bin/annostat" analyze --help
+          "$RUNNER_TEMP/wheel-test/bin/python" -c "import annostat"
+
+      - name: Verify distribution contents
+        run: |
+          python -c "import glob, tarfile; n=tarfile.open(glob.glob('dist/*.tar.gz')[0]).getnames(); assert any(x.endswith('/README.md') for x in n); assert any(x.endswith('/LICENSE') for x in n)"
+          python -c "import glob, zipfile; n=zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist(); assert 'annostat/cli.py' in n; assert not any('/__pycache__/' in x for x in n)"
