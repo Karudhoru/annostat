@@ -84,13 +84,15 @@ def build_root_parser() -> argparse.ArgumentParser:
         ),
         epilog=(
             "commands:\n"
-            "  inspect     analyze one FASTA/GFF3 annotation pair\n"
+            "  analyze     analyze one FASTA/GFF3 annotation pair\n"
             "  validate    check deterministic structural integrity\n"
             "  summarize   aggregate completed Annostat summaries\n"
             "  compare     compare two or more annotated genomes\n"
             "  fetch       download annotated NCBI assemblies\n\n"
+            "example:\n"
+            "  annostat analyze -f genome.fna -g annotations.gff3 -o results\n\n"
             "Run 'annostat COMMAND --help' for command-specific options. "
-            "Legacy 'annostat -f ... -g ...' inspection remains supported."
+            "'inspect' is a supported alias; the option-only form is deprecated."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -105,14 +107,11 @@ def build_parser(prog: str = "annostat") -> argparse.ArgumentParser:
         epilog=(
             "examples:\n"
             "  %(prog)s -f genome.fna -g annotations.gff3\n"
-            "  annostat validate -f genome.fna -g annotations.gff3\n"
-            "  annostat summarize results/batch -o cohort\n"
             "  %(prog)s -f genome.fna -g annotations.gff3 -o results --table-format tsv\n"
-            "  annostat compare --genome a a.fna a.gff3 --genome b b.fna b.gff3\n"
-            "  annostat fetch GCF_000007145.1 -o ncbi_data\n\n"
-            "The output includes an offline HTML report, analysis tables, CDS FASTA files, "
-            "and up to three publication-ready SVG charts. Use the compare and fetch commands "
-            "for multi-genome profiles and NCBI assembly downloads."
+            "  %(prog)s -f genome.fna -g annotations.gff3 --profile\n\n"
+            "Writes an offline HTML report, JSON summary, analysis tables, CDS FASTA files, "
+            "validation results, and publication-ready SVG charts. Exit status 0 indicates "
+            "a completed analysis; invalid inputs or options return status 2."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -683,6 +682,8 @@ def main(arguments: list[str] | None = None) -> int:
         return 0
     if command_arguments[:1] == ["validate"]:
         return _main_validate(command_arguments[1:])
+    if command_arguments[:1] == ["analyze"]:
+        return _main_analysis(command_arguments[1:], prog="annostat analyze")
     if command_arguments[:1] == ["inspect"]:
         return _main_analysis(command_arguments[1:], prog="annostat inspect")
     if command_arguments[:1] == ["summarize"]:
@@ -694,10 +695,15 @@ def main(arguments: list[str] | None = None) -> int:
 
     if command_arguments and not command_arguments[0].startswith("-"):
         build_root_parser().error(
-            f"unknown command {command_arguments[0]!r}; choose inspect, validate, "
+            f"unknown command {command_arguments[0]!r}; choose analyze, validate, "
             "summarize, compare, or fetch"
         )
 
+    print(
+        "annostat: warning: the option-only command is deprecated; "
+        "use 'annostat analyze' instead",
+        file=sys.stderr,
+    )
     return _main_analysis(command_arguments)
 
 

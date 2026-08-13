@@ -724,8 +724,28 @@ class AnnostatTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Analyze bacterial GFF3", result.stdout)
-        for command in ("inspect", "validate", "summarize", "compare", "fetch"):
+        for command in ("analyze", "validate", "summarize", "compare", "fetch"):
             self.assertIn(command, result.stdout)
+
+    def test_cli_exposes_analyze_and_inspect_help(self) -> None:
+        """Both named analysis commands remain fully supported."""
+
+        cli_path = Path(__file__).parents[1] / "annostat" / "cli.py"
+        analyze = subprocess.run(
+            [sys.executable, str(cli_path), "analyze", "--help"],
+            check=False, capture_output=True, text=True,
+        )
+        inspect = subprocess.run(
+            [sys.executable, str(cli_path), "inspect", "--help"],
+            check=False, capture_output=True, text=True,
+        )
+
+        self.assertEqual(analyze.returncode, 0, analyze.stderr)
+        self.assertIn("usage: annostat analyze", analyze.stdout)
+        self.assertNotIn("deprecated", analyze.stderr)
+        self.assertEqual(inspect.returncode, 0, inspect.stderr)
+        self.assertIn("usage: annostat inspect", inspect.stdout)
+        self.assertNotIn("deprecated", inspect.stderr)
 
     def test_cli_exposes_comparison_and_ncbi_help(self) -> None:
         cli_path = Path(__file__).parents[1] / "annostat" / "cli.py"
@@ -758,7 +778,7 @@ class AnnostatTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("unknown command 'inspekt'", result.stderr)
-        self.assertIn("inspect, validate, summarize, compare, or fetch", result.stderr)
+        self.assertIn("analyze, validate, summarize, compare, or fetch", result.stderr)
 
     def test_cli_reports_version(self) -> None:
         cli_path = Path(__file__).parents[1] / "annostat" / "cli.py"
@@ -794,6 +814,7 @@ class AnnostatTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("cannot be greater", result.stderr)
+        self.assertIn("option-only command is deprecated", result.stderr)
 
     def test_cli_prints_progress_summary_and_supports_quiet_mode(self) -> None:
         cli_path = Path(__file__).parents[1] / "annostat" / "cli.py"
