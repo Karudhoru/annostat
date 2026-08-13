@@ -1,9 +1,34 @@
 # Annostat
 
-**Annostat** analyzes bacterial genome annotations from matching GFF3 and FASTA
-files. Local analysis uses only the Python standard library and supports multi-record FASTA files.
+[![PyPI](https://img.shields.io/pypi/v/annostat)](https://pypi.org/project/annostat/)
+[![Python](https://img.shields.io/pypi/pyversions/annostat)](https://pypi.org/project/annostat/)
+[![CI](https://github.com/Karudhoru/annostat/actions/workflows/ci.yml/badge.svg)](https://github.com/Karudhoru/annostat/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/Karudhoru/annostat/blob/main/LICENSE)
 
-## Features
+**Annostat** is a dependency-free command-line toolkit for validating,
+analyzing, comparing, and summarizing bacterial genome annotations from matching
+GFF3 and FASTA files. It produces reproducible machine-readable results,
+self-contained HTML reports, CDS sequence exports, and editable SVG figures.
+
+> Annostat evaluates annotation structure and descriptive quality indicators. It
+> does not replace an annotation pipeline, infer orthology, calculate ANI, or
+> establish biological correctness from sequence alone.
+
+## Contents
+
+- [Capabilities](#capabilities)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Command reference](#command-reference)
+- [Common workflows](#common-workflows)
+- [Inputs and scientific scope](#inputs-and-scientific-scope)
+- [Outputs](#outputs)
+- [Reproducibility and interpretation](#reproducibility-and-interpretation)
+- [Help and troubleshooting](#help-and-troubleshooting)
+- [Testing and development](#testing-and-development)
+- [Scientific basis](#scientific-basis)
+
+## Capabilities
 
 - Counts CDS, RNA types, all feature types, hypothetical proteins, gene annotations,
   and CDS with COG categories
@@ -39,7 +64,7 @@ files. Local analysis uses only the Python standard library and supports multi-r
 - Aggregates completed inspections into a script-free cohort HTML report,
   normalized TSV matrix, and machine-readable JSON
 
-## Required and optional components
+### Requirements
 
 | Component | Status | Purpose |
 |---|---|---|
@@ -53,7 +78,7 @@ files. Local analysis uses only the Python standard library and supports multi-r
 No third-party Python package is required for local analysis, report generation,
 tables, FASTA exports, or SVG plots.
 
-## Core functionality
+### Core outputs
 
 Annostat provides the following core analysis outputs:
 
@@ -72,7 +97,7 @@ Annostat provides the following core analysis outputs:
 Filtering, quality control, HTML reports, performance profiling, comparative
 analysis, cohort summaries, and NCBI connectivity extend the core workflow.
 
-## Input assumptions and scope
+## Inputs and scientific scope
 
 - GFF3 records must contain nine tab-separated fields with 1-based inclusive
   coordinates. The FASTA identifier is the first whitespace-delimited header token.
@@ -93,30 +118,33 @@ analysis, cohort summaries, and NCBI connectivity extend the core workflow.
 ## Installation
 
 Annostat requires Python 3.10 or newer and has no third-party runtime
-dependencies. Clone the repository and create an isolated environment.
+dependencies.
+
+### Install from PyPI
+
+Create an isolated environment and install the current release:
 
 Linux or WSL:
 
 ```bash
-git clone https://github.com/Karudhoru/annostat.git
-cd annostat
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install annostat
 ```
 
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/Karudhoru/annostat.git
-Set-Location annostat
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install annostat
 ```
 
-Install the current release from the checkout and verify the executable:
+Verify the installation:
 
 ```bash
-python -m pip install .
 annostat --version
 annostat --help
 ```
@@ -124,14 +152,30 @@ annostat --help
 Expected version output:
 
 ```text
-Annostat 1.0.0
+Annostat 1.0.1
 ```
 
-Contributors should use `python -m pip install -e .` so source changes take
-effect without reinstalling. If the executable is unavailable, the equivalent
-module form is `python -m annostat`.
+### Install from source
 
-## Quick-start guide
+Use a source checkout for development or an unreleased fix:
+
+```bash
+git clone https://github.com/Karudhoru/annostat.git
+cd annostat
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+```
+
+On Windows, activate with `.\.venv\Scripts\Activate.ps1`. If the installed
+executable is unavailable, the equivalent module form is `python -m annostat`.
+
+### Bioconda
+
+The Bioconda recipe is under community review. Until it is merged, install the
+released package from PyPI or source rather than using an unofficial channel.
+
+## Quick start
 
 ### 1. Check the inputs
 
@@ -153,7 +197,7 @@ annostat validate \
 Example output for the included dataset:
 
 ```text
-Annostat 1.0.0 | annotation validation PASS
+Annostat 1.0.1 | annotation validation PASS
   Errors                   0
   Warnings                 0
   Findings                 0
@@ -167,10 +211,10 @@ report should never stop a pipeline. A validation pass means the paired files ar
 internally interpretable; it does not prove that every biological annotation is
 correct.
 
-### 3. Inspect one annotation
+### 3. Analyze one annotation
 
 ```bash
-annostat inspect \
+annostat analyze \
   -f data/GCF_000007145.1.fna \
   -g data/GCF_000007145.1.gff3 \
   -o results \
@@ -179,8 +223,7 @@ annostat inspect \
 
 Here `-f` selects the required FASTA, `-g` selects the required GFF3, and `-o`
 chooses the output directory. Add `--table-format tsv` when a TSV overview is
-preferred over CSV. The original command without the `inspect` word remains a
-backward-compatible alias. Translation-table selection is automatic when the
+preferred over CSV. Translation-table selection is automatic when the
 GFF3 CDS or `region` rows contain `transl_table`; otherwise table 11 is used.
 The included example produces a 5,076,188 bp analysis with 4,295 CDS. For a local
 annotation without translation-table metadata, select a supported table explicitly
@@ -209,6 +252,22 @@ ordered deterministically. Missing source-dependent values such as COG coverage
 remain `NA`/`null`, never biological zero. Multiple source Annostat versions are
 retained and flagged in the report.
 
+## Command reference
+
+| Command | Purpose | Primary output |
+|---|---|---|
+| `annostat analyze` | Analyze one matching FASTA/GFF3 pair | HTML, JSON, tables, CDS FASTA, SVG |
+| `annostat validate` | Check deterministic structural and cross-file integrity | JSON and TSV validation findings |
+| `annostat summarize` | Aggregate completed Annostat analyses | Cohort HTML, TSV, and JSON |
+| `annostat compare` | Compare two or more local or NCBI annotations | Comparative HTML, JSON, TSV, and SVG |
+| `annostat fetch` | Download versioned NCBI assemblies | FASTA, GFF3, and assembly metadata |
+
+Run `annostat COMMAND --help` for required arguments, defaults, examples, and
+output behavior. `annostat inspect` is a fully supported alias for the same
+single-annotation workflow. The older `annostat -f ... -g ...` form remains
+compatible in the 1.x series but is deprecated; new scripts should use an
+explicit command.
+
 ## Common workflows
 
 The following sections show filtered exports, comparative analysis, NCBI
@@ -226,7 +285,7 @@ Filters create an additional `filtered/` directory while retaining every normal
 analysis file. Criteria are combined, so a CDS must satisfy all enabled options:
 
 ```bash
-annostat \
+annostat analyze \
   -f genome.fna \
   -g annotations.gff3 \
   -o results \
@@ -336,6 +395,8 @@ The `NCBI_API_KEY` environment variable is honored by the official client. Local
 analysis never requires a network connection, and Annostat does not transmit
 local FASTA or GFF3 files.
 
+## Outputs
+
 The output directory contains:
 
 ```text
@@ -374,7 +435,9 @@ overlaps and adjacent duplicate labels are informational. Containment, incomplet
 frames, missing structural RNA classes, internal stops, and ambiguous bases are
 reported as warnings that merit inspection in their biological context.
 
-## Validation versus inspection
+## Reproducibility and interpretation
+
+### Validation versus analysis
 
 `annostat validate` answers whether the files can be interpreted consistently:
 GFF3 syntax, FASTA symbols, matching sequence IDs, coordinate bounds, Parent/ID
@@ -382,7 +445,7 @@ relationships, multipart-feature consistency, CDS phase continuity, and valid,
 consistent CDS translation-table declarations. These checks are deterministic
 and may safely control a CI exit status.
 
-`annostat inspect` first requires structural validation to pass, then reports
+`annostat analyze` first requires structural validation to pass, then reports
 biological review candidates such as internal stops, missing terminal codons,
 ambiguous CDS bases, overlaps, partial features, pseudogenes, duplicated adjacent
 labels, and structural-RNA coverage. These findings are context-dependent and do
@@ -395,11 +458,41 @@ Every validation result embeds its rule definitions, rationale, source URL,
 ruleset version, schema version, Annostat version, and input SHA-256 hashes. JSON
 and TSV findings use canonical ordering and contain no timestamp, so repeated runs
 on identical paths and bytes produce byte-identical validation artifacts. A
-`scientific_fingerprint` in both validation and inspection JSON excludes file
+`scientific_fingerprint` in both validation and analysis JSON excludes file
 paths and performance timings, allowing scientific results to be compared across
 machines and output directories.
 
-## Testing and verification
+## Help and troubleshooting
+
+Start with the command-specific help rather than guessing an option:
+
+```bash
+annostat --help
+annostat analyze --help
+annostat validate --help
+annostat summarize --help
+annostat compare --help
+annostat fetch --help
+```
+
+Common problems:
+
+- **`annostat` is not found:** activate the environment where it was installed,
+  or run `python -m annostat --help`.
+- **The wrong Python starts:** use `python3 -m pip` on Linux/WSL or `py -3 -m pip`
+  on Windows, then invoke Annostat from the same environment.
+- **FASTA and GFF3 identifiers do not match:** compare the FASTA header token with
+  the first GFF3 column; Annostat intentionally rejects ambiguous pairings.
+- **COG values are unavailable:** the annotation source did not provide COG
+  categories. Annostat does not reinterpret missing source data as zero.
+- **NCBI download fails:** confirm that the official NCBI Datasets CLI is installed
+  and available on `PATH`; local analysis itself never needs network access.
+
+For reproducible bug reports, include `annostat --version`, the complete command,
+the terminal error, and a minimal non-sensitive input pair when possible. Report
+problems through the [GitHub issue tracker](https://github.com/Karudhoru/annostat/issues).
+
+## Testing and development
 
 Run compilation and all automated tests with the interpreter used to install
 Annostat:
@@ -414,17 +507,17 @@ For a final end-to-end check, analyze one supplied genome and confirm that
 plots are created:
 
 ```bash
-annostat inspect \
+annostat analyze \
   -f data/GCF_000007145.1.fna \
   -g data/GCF_000007145.1.gff3 \
   -o results \
   --table-format tsv
 ```
 
-## Example run
+### Example terminal output
 
 ```bash
-annostat inspect \
+annostat analyze \
   -f data/GCF_000007145.1.fna \
   -g data/GCF_000007145.1.gff3 \
   -o results \
@@ -434,7 +527,7 @@ annostat inspect \
 Example output:
 
 ```text
-Annostat 1.0.0 | bacterial genome annotation analysis
+Annostat 1.0.1 | bacterial genome annotation analysis
 FASTA: /path/to/annostat/data/GCF_000007145.1.fna
 GFF3:  /path/to/annostat/data/GCF_000007145.1.gff3
 
