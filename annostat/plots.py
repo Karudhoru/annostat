@@ -80,9 +80,9 @@ def write_bar_chart(
     maximum = max((value for _, value in items), default=1)
     elements = _header(width, height, title, description)
 
-    for tick in range(5):
-        x = left + plot_width * tick / 4
-        value = round(maximum * tick / 4)
+    tick_values = sorted({round(maximum * tick / 4) for tick in range(5)})
+    for value in tick_values:
+        x = left + plot_width * value / maximum
         elements.extend(
             [
                 f'<line x1="{x:.1f}" y1="{top - 10}" x2="{x:.1f}" y2="{height - 72}" stroke="{_GRID}" stroke-dasharray="3 5"/>',
@@ -143,9 +143,9 @@ def write_histogram(path: Path, title: str, values: Sequence[int], bins: int = 2
     histogram: Counter[int] = Counter((value - minimum) // bin_width for value in values)
     peak = max(histogram.values(), default=1)
 
-    for tick in range(5):
-        y = top + plot_height - plot_height * tick / 4
-        count = round(peak * tick / 4)
+    tick_counts = sorted({round(peak * tick / 4) for tick in range(5)})
+    for count in tick_counts:
+        y = top + plot_height - plot_height * count / peak
         elements.extend(
             [
                 f'<line x1="{left}" y1="{y:.1f}" x2="{width - right}" y2="{y:.1f}" stroke="{_GRID}" stroke-dasharray="3 5"/>',
