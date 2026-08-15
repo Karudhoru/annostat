@@ -180,7 +180,8 @@ def build_validate_parser() -> argparse.ArgumentParser:
             "example:\n"
             "  annostat validate -f genome.fna -g annotations.gff3 -o validation\n\n"
             "Exit status 0 means the selected failure threshold was not reached; "
-            "status 1 means it was reached. JSON and TSV results are always written."
+            "status 1 means it was reached. JSON and TSV results are written only "
+            "when validation finds an issue."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -522,6 +523,7 @@ def run_analysis(
         "TTG": start_counts.get("TTG", 0),
         "Other recognized": other_recognized_starts,
         "Unrecognized": sum(start_counts.values()) - recognized_start_total,
+        "No complete first codon": len(cds_lengths) - sum(start_counts.values()),
     }
     # The chart stays readable while the CSV retains every observed start codon.
     write_bar_chart(
@@ -695,8 +697,8 @@ def main(arguments: list[str] | None = None) -> int:
 
     if command_arguments and not command_arguments[0].startswith("-"):
         build_root_parser().error(
-            f"unknown command {command_arguments[0]!r}; choose analyze, validate, "
-            "summarize, compare, or fetch"
+            f"unknown command {command_arguments[0]!r}; choose analyze, inspect, "
+            "validate, summarize, compare, or fetch"
         )
 
     print(
