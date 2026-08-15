@@ -475,6 +475,9 @@ def quality_summary(
     finding_list = list(findings)
     genome_length = sum(map(len, genome.values()))
     gc_bases = sum(sequence.count("G") + sequence.count("C") for sequence in genome.values())
+    canonical_bases = sum(
+        sum(sequence.count(base) for base in "ACGT") for sequence in genome.values()
+    )
     explicit_cds_ids: set[str] = set()
     anonymous_cds_count = 0
     for feature in feature_list:
@@ -490,7 +493,7 @@ def quality_summary(
     issue_counts = Counter(finding.issue_type for finding in finding_list)
     severity_counts = Counter(finding.severity for finding in finding_list)
     return {
-        "genome_gc_percent": 100 * gc_bases / genome_length if genome_length else 0,
+        "genome_gc_percent": 100 * gc_bases / canonical_bases if canonical_bases else 0,
         "coding_density_percent": 100 * covered_bases / genome_length if genome_length else 0,
         "cds_per_kb": 1000 * cds_count / genome_length if genome_length else 0,
         "finding_count": len(finding_list),
