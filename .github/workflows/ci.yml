@@ -82,7 +82,7 @@ jobs:
       - name: Verify scientific and report outputs
         run: |
           python -c "import json, os, pathlib; p=pathlib.Path(os.environ['RUNNER_TEMP']); s=json.loads((p/'sample-a/summary.json').read_text()); assert s['genome_length']==5076188; assert s['cds_count']==4295; assert len(s['scientific_fingerprint'])==64"
-          python -c "import json, os, pathlib; p=pathlib.Path(os.environ['RUNNER_TEMP']); assert json.loads((p/'validation/validation.json').read_text())['valid']; assert json.loads((p/'cohort/cohort.json').read_text())['sample_count']==2"
+          python -c "import json, os, pathlib; p=pathlib.Path(os.environ['RUNNER_TEMP']); assert not (p/'validation').exists(); assert json.loads((p/'cohort/cohort.json').read_text())['sample_count']==2"
           python -c "import os, pathlib, xml.etree.ElementTree as ET; p=pathlib.Path(os.environ['RUNNER_TEMP']); ET.parse(p/'sample-a/plots/cds_lengths.svg'); assert '<html' in (p/'sample-a/report.html').read_text().lower(); assert (p/'comparison/comparison.json').is_file()"
 
   package:

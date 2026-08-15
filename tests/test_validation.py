@@ -360,17 +360,35 @@ class ValidationTests(unittest.TestCase):
                  "-o", str(root / "pass")],
                 capture_output=True, text=True, check=False,
             )
+            self.assertFalse((root / "pass").exists())
+            self.assertIn("No validation issues found", passed.stdout)
+            gff.write_text(
+                "chr\ttest\tCDS\t1\t9\t.\t+\t0\tID=cds1\n",
+                encoding="utf-8",
+            )
+            warned = subprocess.run(
+                [sys.executable, str(cli), "validate", "-f", str(fasta), "-g", str(gff),
+                 "-o", str(root / "warning")],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(warned.returncode, 0, warned.stderr)
+            self.assertTrue((root / "warning" / "validation.json").is_file())
+            self.assertTrue((root / "warning" / "validation.tsv").is_file())
             gff.write_text("bad\n", encoding="utf-8")
             failed = subprocess.run(
                 [sys.executable, str(cli), "validate", "-f", str(fasta), "-g", str(gff),
                  "-o", str(root / "fail")],
                 capture_output=True, text=True, check=False,
             )
+            self.assertTrue((root / "fail" / "validation.json").is_file())
+            self.assertTrue((root / "fail" / "validation.tsv").is_file())
             ignored = subprocess.run(
                 [sys.executable, str(cli), "validate", "-f", str(fasta), "-g", str(gff),
                  "-o", str(root / "ignore"), "--fail-on", "never"],
                 capture_output=True, text=True, check=False,
             )
+            self.assertTrue((root / "ignore" / "validation.json").is_file())
+            self.assertTrue((root / "ignore" / "validation.tsv").is_file())
 
         self.assertEqual(passed.returncode, 0, passed.stderr)
         self.assertIn("PASS", passed.stdout)

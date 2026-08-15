@@ -762,16 +762,20 @@ def _main_validate(arguments: list[str]) -> int:
     parser = build_validate_parser()
     args = parser.parse_args(arguments)
     result = validate_annotation(args.fasta, args.gff)
-    files = write_validation(args.output, result)
     counts = result["severity_counts"]
+    finding_count = sum(counts.values())
+    files = write_validation(args.output, result) if finding_count else []
     if not args.quiet:
         status = "PASS" if result["valid"] else "FAIL"
         print(f"Annostat {__version__} | annotation validation {status}")
-        print(f"  Errors                   {counts['error']:,}")
-        print(f"  Warnings                 {counts['warning']:,}")
-        print(f"  Findings                 {sum(counts.values()):,}")
-        print(f"  Output                   {args.output.resolve()}")
-        print(f"  Files written            {len(files)}")
+        if finding_count:
+            print(f"  Errors                   {counts['error']:,}")
+            print(f"  Warnings                 {counts['warning']:,}")
+            print(f"  Findings                 {finding_count:,}")
+            print(f"  Output                   {args.output.resolve()}")
+            print(f"  Files written            {len(files)}")
+        else:
+            print("  No validation issues found; no output files were written.")
     if args.fail_on == "never":
         return 0
     if counts["error"]:
