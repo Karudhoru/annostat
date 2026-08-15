@@ -34,6 +34,11 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Manual release runs validate that the selected tag matches the package version,
   safely skip files already present on PyPI, and can recover GitHub asset uploads.
+- Standalone validation no longer creates empty result files when no issues are
+  found, while full analysis retains validation provenance.
+- Genome GC percentage excludes ambiguous bases from its denominator.
+- Start-codon plots account explicitly for CDS records shorter than one codon.
+- Validation help and README examples describe conditional validation outputs.
 
 ## [1.0.0]
 
