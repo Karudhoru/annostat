@@ -2,8 +2,8 @@
 
 [![PyPI](https://img.shields.io/pypi/v/annostat)](https://pypi.org/project/annostat/)
 [![Python](https://img.shields.io/pypi/pyversions/annostat)](https://pypi.org/project/annostat/)
-[![CI](https://github.com/Karudhoru/annostat/actions/workflows/ci.yml/badge.svg)](https://github.com/Karudhoru/annostat/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/Karudhoru/annostat/blob/main/LICENSE)
+[![CI](https://github.com/dpatel511/annostat/actions/workflows/ci.yml/badge.svg)](https://github.com/dpatel511/annostat/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/dpatel511/annostat/blob/main/LICENSE)
 
 **Annostat** is a dependency-free command-line toolkit for validating,
 analyzing, comparing, and summarizing bacterial genome annotations from matching
@@ -114,6 +114,9 @@ analysis, cohort summaries, and NCBI connectivity extend the core workflow.
   explicit override for annotations without that metadata; an override that
   conflicts with a declared table is rejected instead of silently mistranslating
   CDS features. Annostat never guesses a genetic code from sequence composition.
+- Genome GC percentage uses canonical A, C, G, and T bases; ambiguous bases are
+  excluded from its denominator. Assembly length and coding density still use
+  the complete sequence length.
 
 ## Installation
 
@@ -160,7 +163,7 @@ Annostat 1.0.1
 Use a source checkout for development or an unreleased fix:
 
 ```bash
-git clone https://github.com/Karudhoru/annostat.git
+git clone https://github.com/dpatel511/annostat.git
 cd annostat
 python3 -m venv .venv
 source .venv/bin/activate
@@ -201,15 +204,15 @@ Annostat 1.0.1 | annotation validation PASS
   Errors                   0
   Warnings                 0
   Findings                 0
-  Files written            2
 ```
 
-The command writes `validation.json` and `validation.tsv`. Exit status `0` means
-no structural errors were found; status `1` means the configured threshold was
-reached. Use `--fail-on warning` for strict CI, or `--fail-on never` when the
-report should never stop a pipeline. A validation pass means the paired files are
-internally interpretable; it does not prove that every biological annotation is
-correct.
+When no issues are found, the standalone command does not create an output
+directory or files. If it finds any warning or error, it writes
+`validation.json` and `validation.tsv`. Exit status `0` means the configured
+failure threshold was not reached; status `1` means it was reached. Use
+`--fail-on warning` for strict CI, or `--fail-on never` when the report should
+never stop a pipeline. A validation pass means the paired files are internally
+interpretable; it does not prove that every biological annotation is correct.
 
 ### 3. Analyze one annotation
 
@@ -490,7 +493,7 @@ Common problems:
 
 For reproducible bug reports, include `annostat --version`, the complete command,
 the terminal error, and a minimal non-sensitive input pair when possible. Report
-problems through the [GitHub issue tracker](https://github.com/Karudhoru/annostat/issues).
+problems through the [GitHub issue tracker](https://github.com/dpatel511/annostat/issues).
 
 ## Testing and development
 

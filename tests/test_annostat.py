@@ -78,6 +78,11 @@ class AnnostatTests(unittest.TestCase):
         self.assertIn("2 bp overlap", overlaps[0].details)
         self.assertAlmostEqual(summary["coding_density_percent"], 7 / 9 * 100)
 
+    def test_gc_percentage_excludes_ambiguous_bases_from_denominator(self) -> None:
+        summary = quality_summary([], {"contig": "ACGTNNNNACGT"}, frozenset(), [])
+
+        self.assertEqual(summary["genome_gc_percent"], 50.0)
+
     def test_required_counts_and_codon_usage(self) -> None:
         features = [
             Feature(
@@ -335,6 +340,25 @@ class AnnostatTests(unittest.TestCase):
             )
             self.assertNotIn("<script>alert(1)</script>", escaped_report)
             self.assertIn("unsafe&amp;annotation.gff3", escaped_report)
+
+    def test_start_codon_plot_accounts_for_short_cds(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fasta = root / "genome.fna"
+            gff = root / "genes.gff3"
+            output = root / "results"
+            fasta.write_text(">chr\nAT\n", encoding="utf-8")
+            gff.write_text(
+                "##gff-version 3\nchr\ttest\tCDS\t1\t2\t.\t+\t0\tID=short\n",
+                encoding="utf-8",
+            )
+
+            run_analysis(fasta, gff, output, "csv")
+
+            plot = (output / "plots" / "start_codons.svg").read_text(encoding="utf-8")
+            self.assertIn("No complete first codon", plot)
+            self.assertRegex(plot, r"1\s+\(100\.00%\)")
+            self.assertEqual(plot.count('stroke-dasharray="3 5"'), 2)
 
     def test_reused_output_directory_removes_only_stale_generated_variants(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -778,7 +802,9 @@ class AnnostatTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("unknown command 'inspekt'", result.stderr)
-        self.assertIn("analyze, validate, summarize, compare, or fetch", result.stderr)
+        self.assertIn(
+            "analyze, inspect, validate, summarize, compare, or fetch", result.stderr
+        )
 
     def test_cli_reports_version(self) -> None:
         cli_path = Path(__file__).parents[1] / "annostat" / "cli.py"
