@@ -32,7 +32,6 @@ from annostat.output import (
     write_overview,
     write_summary,
 )
-from annostat.parsers import parse_fasta, parse_gff
 from annostat.plots import write_bar_chart, write_histogram
 from annostat.qc import (
     feature_quality_findings,
@@ -47,7 +46,11 @@ from annostat.sequences import (
     recognized_start_codons,
     resolve_genetic_code,
 )
-from annostat.validation import validate_annotation, write_validation
+from annostat.validation import (
+    load_and_validate_annotation,
+    validate_annotation,
+    write_validation,
+)
 
 
 def _scientific_fingerprint(summary: dict[str, object]) -> str:
@@ -337,7 +340,8 @@ def run_analysis(
 
     notify("Reading GFF3 annotations and FASTA sequences")
     stage_started = perf_counter()
-    validation = validate_annotation(fasta_path, gff_path)
+    validated = load_and_validate_annotation(fasta_path, gff_path)
+    validation = validated.validation
     if not validation["valid"]:
         errors = [
             finding for finding in validation["findings"]
@@ -348,8 +352,8 @@ def run_analysis(
             f"input validation failed with {len(errors)} error(s): "
             f"{first['rule_id']}: {first['message']}"
         )
-    features = list(parse_gff(gff_path))
-    genome = parse_fasta(fasta_path)
+    features = validated.features
+    genome = validated.genome
     declared_codes = declared_genetic_codes(features)
     selected_genetic_code = resolve_genetic_code(features, genetic_code)
     genetic_code_source = (

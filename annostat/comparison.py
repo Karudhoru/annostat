@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import math
 from collections import Counter
@@ -17,7 +16,6 @@ from urllib.parse import parse_qs, urlparse
 from annostat import __version__
 from annostat.analysis import COG_CATEGORY_NAMES, analyze_features
 from annostat.models import Feature
-from annostat.parsers import parse_fasta, parse_gff
 from annostat.plots import write_cog_comparison, write_comparison_overview
 from annostat.qc import feature_quality_findings, quality_summary, sequence_quality_findings
 from annostat.sequences import (
@@ -26,7 +24,7 @@ from annostat.sequences import (
     recognized_start_codons,
     resolve_genetic_code,
 )
-from annostat.validation import validate_annotation
+from annostat.validation import load_and_validate_annotation
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,16 +36,6 @@ class GenomeInput:
     gff: Path
     metadata: dict[str, object] | None = None
     genetic_code: int | None = None
-
-
-def _sha256(path: Path) -> str:
-    """Return the hexadecimal SHA-256 digest of a file."""
-
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _cog_ids(feature: Feature) -> set[str]:
@@ -136,7 +124,8 @@ def _taxonomic_relationship(left: dict[str, object], right: dict[str, object]) -
 def _annotation_profile(dataset: GenomeInput) -> dict[str, object]:
     """Calculate the normalized comparison profile for one input dataset."""
 
-    validation = validate_annotation(dataset.fasta, dataset.gff)
+    validated = load_and_validate_annotation(dataset.fasta, dataset.gff)
+    validation = validated.validation
     if not validation["valid"]:
         errors = [
             finding for finding in validation["findings"]
@@ -147,8 +136,8 @@ def _annotation_profile(dataset: GenomeInput) -> dict[str, object]:
             f"dataset {dataset.label!r} failed validation with {len(errors)} error(s): "
             f"{first['rule_id']}: {first['message']}"
         )
-    features = list(parse_gff(dataset.gff))
-    genome = parse_fasta(dataset.fasta)
+    features = validated.features
+    genome = validated.genome
     circular_seqids = frozenset(
         feature.seqid
         for feature in features
@@ -223,7 +212,7 @@ def _annotation_profile(dataset: GenomeInput) -> dict[str, object]:
         "checkm_completeness": metadata.get("checkm_completeness"),
         "checkm_contamination": metadata.get("checkm_contamination"),
         "inputs": {"fasta": str(dataset.fasta), "gff3": str(dataset.gff)},
-        "sha256": {"fasta": _sha256(dataset.fasta), "gff3": _sha256(dataset.gff)},
+        "sha256": dict(validation["input_sha256"]),
         "validation": {
             "valid": validation["valid"],
             "ruleset_version": validation["ruleset_version"],
