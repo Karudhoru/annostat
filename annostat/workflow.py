@@ -37,13 +37,22 @@ from annostat.sequences import (
 from annostat.validation import load_and_validate_annotation, write_validation
 
 
+ANALYSIS_SCHEMA_VERSION = "1.0"
+
+
 def _scientific_fingerprint(summary: dict[str, object]) -> str:
     """Hash scientific outputs while excluding paths and performance timings."""
 
     payload = {
         key: value
         for key, value in summary.items()
-        if key not in {"input_files", "output_files", "performance", "scientific_fingerprint"}
+        if key not in {
+            "input_files",
+            "output_files",
+            "performance",
+            "schema_version",
+            "scientific_fingerprint",
+        }
     }
     validation = payload.get("validation")
     if isinstance(validation, dict):
@@ -181,6 +190,7 @@ def _run_analysis(
     notify("Calculating statistics and writing analysis tables")
     stage_started = perf_counter()
     summary = analyze_features(features)
+    summary["schema_version"] = ANALYSIS_SCHEMA_VERSION
     summary["cog_data_available"] = bool(summary["cog_category_counts"])
     summary["annostat_version"] = __version__
     summary["genetic_code"] = selected_genetic_code

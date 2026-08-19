@@ -31,7 +31,11 @@ from annostat.sequences import (
     reverse_complement,
     translate_dna,
 )
-from annostat.workflow import run_analysis as workflow_run_analysis
+from annostat.workflow import (
+    ANALYSIS_SCHEMA_VERSION,
+    _scientific_fingerprint,
+    run_analysis as workflow_run_analysis,
+)
 
 
 class AnnostatTests(unittest.TestCase):
@@ -253,6 +257,14 @@ class AnnostatTests(unittest.TestCase):
     def test_cli_preserves_run_analysis_compatibility_import(self) -> None:
         self.assertIs(run_analysis, workflow_run_analysis)
 
+    def test_schema_version_does_not_change_scientific_fingerprint(self) -> None:
+        summary = {"cds_count": 1}
+        expected = _scientific_fingerprint(summary)
+
+        summary["schema_version"] = ANALYSIS_SCHEMA_VERSION
+
+        self.assertEqual(_scientific_fingerprint(summary), expected)
+
     def test_profiling_stops_when_analysis_fails(self) -> None:
         with (
             patch(
@@ -325,6 +337,9 @@ class AnnostatTests(unittest.TestCase):
             )
             written_summary = json.loads((output / "summary.json").read_text())
             self.assertEqual(written_summary["cds_count"], 1)
+            self.assertEqual(
+                written_summary["schema_version"], ANALYSIS_SCHEMA_VERSION
+            )
             self.assertRegex(written_summary["annostat_version"], r"^\d+\.\d+\.\d+$")
             self.assertRegex(written_summary["scientific_fingerprint"], r"^[0-9a-f]{64}$")
             self.assertEqual(written_summary["input_files"]["fasta"], str(fasta))

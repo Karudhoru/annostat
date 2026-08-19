@@ -17,6 +17,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The reusable single-annotation workflow now lives outside the CLI module while
   retaining the existing `annostat.cli.run_analysis` compatibility import.
 - Profiling cleanup now stops memory tracing when analysis raises an exception.
+- Single-genome JSON summaries now declare analysis schema version `1.0`
+  without changing the scientific fingerprint.
 
 ## [1.0.1]
 
