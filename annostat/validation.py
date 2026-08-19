@@ -57,6 +57,20 @@ class ValidationFinding:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class ValidatedAnnotation:
+    """Hold parsed inputs together with their deterministic validation result.
+
+    Analysis workflows use this internal bundle to avoid parsing the same FASTA
+    and GFF3 files again after validation. ``validate_annotation`` remains the
+    stable JSON-safe public interface for callers that only need validation.
+    """
+
+    genome: dict[str, str]
+    features: tuple[Feature, ...]
+    validation: dict[str, object]
+
+
 RULES = {
     rule.rule_id: rule
     for rule in (
@@ -428,8 +442,11 @@ def _sort_key(finding: ValidationFinding) -> tuple[object, ...]:
     )
 
 
-def validate_annotation(fasta_path: Path, gff_path: Path) -> dict[str, object]:
-    """Validate paired inputs and return a deterministic, JSON-safe result.
+def load_and_validate_annotation(
+    fasta_path: Path,
+    gff_path: Path,
+) -> ValidatedAnnotation:
+    """Parse paired inputs once and return their validation and loaded data.
 
     ``valid`` reflects structural errors only. Warnings identify portability or
     metadata concerns and do not assert that the underlying biology is wrong.
@@ -505,7 +522,17 @@ def validate_annotation(fasta_path: Path, gff_path: Path) -> dict[str, object]:
             ensure_ascii=False,
         ).encode("utf-8")
     ).hexdigest()
-    return result
+    return ValidatedAnnotation(
+        genome=genome,
+        features=tuple(features),
+        validation=result,
+    )
+
+
+def validate_annotation(fasta_path: Path, gff_path: Path) -> dict[str, object]:
+    """Validate paired inputs and return a deterministic, JSON-safe result."""
+
+    return load_and_validate_annotation(fasta_path, gff_path).validation
 
 
 def canonical_json(result: Mapping[str, object]) -> str:

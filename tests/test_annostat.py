@@ -341,6 +341,27 @@ class AnnostatTests(unittest.TestCase):
             self.assertNotIn("<script>alert(1)</script>", escaped_report)
             self.assertIn("unsafe&amp;annotation.gff3", escaped_report)
 
+    def test_analysis_parses_each_input_only_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fasta = root / "genome.fna"
+            gff = root / "genes.gff3"
+            fasta.write_text(">chr\nATGAAATAA\n", encoding="utf-8")
+            gff.write_text(
+                "##gff-version 3\n"
+                "chr\ttest\tCDS\t1\t9\t.\t+\t0\tID=cds1;product=test\n",
+                encoding="utf-8",
+            )
+
+            with (
+                patch("annostat.validation.parse_fasta", wraps=parse_fasta) as fasta_parser,
+                patch("annostat.validation.parse_gff", wraps=parse_gff) as gff_parser,
+            ):
+                run_analysis(fasta, gff, root / "results", "csv")
+
+            self.assertEqual(fasta_parser.call_count, 1)
+            self.assertEqual(gff_parser.call_count, 1)
+
     def test_start_codon_plot_accounts_for_short_cds(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

@@ -6,6 +6,15 @@ and command-line executable retain the lowercase technical name `annostat`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Single-genome and comparative workflows reuse the FASTA and GFF3 records
+  loaded during validation instead of parsing both inputs a second time.
+- Comparative input hashes now reuse the deterministic validation hashes rather
+  than reading each source file again.
+
 ## [1.0.1]
 
 ### Added
