@@ -257,11 +257,12 @@ class AnnostatTests(unittest.TestCase):
     def test_cli_preserves_run_analysis_compatibility_import(self) -> None:
         self.assertIs(run_analysis, workflow_run_analysis)
 
-    def test_schema_version_does_not_change_scientific_fingerprint(self) -> None:
+    def test_metadata_does_not_change_scientific_fingerprint(self) -> None:
         summary = {"cds_count": 1}
         expected = _scientific_fingerprint(summary)
 
         summary["schema_version"] = ANALYSIS_SCHEMA_VERSION
+        summary["annostat_version"] = "1.0.2"
 
         self.assertEqual(_scientific_fingerprint(summary), expected)
 

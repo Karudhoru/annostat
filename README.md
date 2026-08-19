@@ -155,7 +155,7 @@ annostat --help
 Expected version output:
 
 ```text
-Annostat 1.0.1
+Annostat 1.0.2
 ```
 
 ### Install from source
@@ -200,7 +200,7 @@ annostat validate \
 Example output for the included dataset:
 
 ```text
-Annostat 1.0.1 | annotation validation PASS
+Annostat 1.0.2 | annotation validation PASS
   Errors                   0
   Warnings                 0
   Findings                 0
@@ -530,7 +530,7 @@ annostat analyze \
 Example output:
 
 ```text
-Annostat 1.0.1 | bacterial genome annotation analysis
+Annostat 1.0.2 | bacterial genome annotation analysis
 FASTA: /path/to/annostat/data/GCF_000007145.1.fna
 GFF3:  /path/to/annostat/data/GCF_000007145.1.gff3
 

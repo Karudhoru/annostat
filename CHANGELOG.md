@@ -8,6 +8,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-08-19
+
 ### Changed
 
 - Single-genome and comparative workflows reuse the FASTA and GFF3 records
@@ -18,7 +20,8 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   retaining the existing `annostat.cli.run_analysis` compatibility import.
 - Profiling cleanup now stops memory tracing when analysis raises an exception.
 - Single-genome JSON summaries now declare analysis schema version `1.0`
-  without changing the scientific fingerprint.
+  without contributing metadata to the scientific fingerprint. Package-version
+  metadata is likewise excluded so fingerprint comparisons remain release-neutral.
 
 ## [1.0.1]
 

@@ -47,6 +47,7 @@ def _scientific_fingerprint(summary: dict[str, object]) -> str:
         key: value
         for key, value in summary.items()
         if key not in {
+            "annostat_version",
             "input_files",
             "output_files",
             "performance",
