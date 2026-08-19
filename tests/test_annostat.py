@@ -31,6 +31,7 @@ from annostat.sequences import (
     reverse_complement,
     translate_dna,
 )
+from annostat.workflow import run_analysis as workflow_run_analysis
 
 
 class AnnostatTests(unittest.TestCase):
@@ -248,6 +249,30 @@ class AnnostatTests(unittest.TestCase):
         self.assertGreater(summary["coding_density_percent"], 0)
         self.assertGreater(summary["genome_gc_percent"], 0)
         self.assertEqual(summary["finding_count"], len(findings) + len(sequence_findings))
+
+    def test_cli_preserves_run_analysis_compatibility_import(self) -> None:
+        self.assertIs(run_analysis, workflow_run_analysis)
+
+    def test_profiling_stops_when_analysis_fails(self) -> None:
+        with (
+            patch(
+                "annostat.workflow.load_and_validate_annotation",
+                side_effect=ValueError("validation failed"),
+            ),
+            patch("annostat.workflow.tracemalloc.start") as start,
+            patch("annostat.workflow.tracemalloc.stop") as stop,
+            self.assertRaisesRegex(ValueError, "validation failed"),
+        ):
+            workflow_run_analysis(
+                Path("genome.fna"),
+                Path("genes.gff3"),
+                Path("results"),
+                "csv",
+                profile=True,
+            )
+
+        start.assert_called_once_with()
+        stop.assert_called_once_with()
 
     def test_end_to_end_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

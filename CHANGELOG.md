@@ -14,6 +14,9 @@ and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   loaded during validation instead of parsing both inputs a second time.
 - Comparative input hashes now reuse the deterministic validation hashes rather
   than reading each source file again.
+- The reusable single-annotation workflow now lives outside the CLI module while
+  retaining the existing `annostat.cli.run_analysis` compatibility import.
+- Profiling cleanup now stops memory tracing when analysis raises an exception.
 
 ## [1.0.1]
 
