@@ -6,7 +6,7 @@ on:
       tag:
         description: "Existing release tag to publish"
         required: true
-        default: "v1.0.1"
+        default: "v1.0.2"
       publish_pypi:
         description: "Publish distributions to PyPI"
         required: true
