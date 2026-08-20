@@ -542,12 +542,16 @@ def canonical_json(result: Mapping[str, object]) -> str:
 
 
 def write_validation(output_dir: Path, result: Mapping[str, object]) -> list[Path]:
-    """Write canonical JSON plus a flat TSV finding table."""
+    """Write canonical JSON and a TSV table when findings are present."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / "validation.json"
     table_path = output_dir / "validation.tsv"
     json_path.write_text(canonical_json(result), encoding="utf-8")
+    findings = result["findings"]
+    if not findings:
+        table_path.unlink(missing_ok=True)
+        return [json_path]
     fieldnames = [
         "rule_id", "severity", "message", "seqid", "feature_id", "start",
         "end", "observed", "expected",
@@ -555,5 +559,5 @@ def write_validation(output_dir: Path, result: Mapping[str, object]) -> list[Pat
     with table_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
         writer.writeheader()
-        writer.writerows(result["findings"])
+        writer.writerows(findings)
     return [json_path, table_path]

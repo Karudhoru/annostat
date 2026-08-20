@@ -321,7 +321,7 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(record.protein, "MU")
         self.assertEqual(record.translation_exception_indices, (1,))
 
-    def test_validation_outputs_are_byte_reproducible(self) -> None:
+    def test_clean_validation_json_is_reproducible_and_removes_stale_tsv(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             fasta, gff = self._write_pair(
@@ -336,15 +336,16 @@ class ValidationTests(unittest.TestCase):
             write_validation(first, result)
             write_validation(second, validate_annotation(fasta, gff))
 
+            (first / "validation.tsv").write_text("stale\n", encoding="utf-8")
+            write_validation(first, result)
+
             self.assertEqual(canonical_json(result), canonical_json(validate_annotation(fasta, gff)))
             self.assertEqual(
                 (first / "validation.json").read_bytes(),
                 (second / "validation.json").read_bytes(),
             )
-            self.assertEqual(
-                (first / "validation.tsv").read_bytes(),
-                (second / "validation.tsv").read_bytes(),
-            )
+            self.assertFalse((first / "validation.tsv").exists())
+            self.assertFalse((second / "validation.tsv").exists())
 
     def test_validate_cli_has_ci_friendly_exit_status(self) -> None:
         cli = Path(__file__).parents[1] / "annostat" / "cli.py"

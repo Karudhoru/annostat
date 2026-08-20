@@ -318,7 +318,7 @@ class AnnostatTests(unittest.TestCase):
                 "plots/cds_lengths.svg", "plots/start_codons.svg",
                 "tables/annotation_issues.csv", "filtered/features.tsv",
                 "filtered/cds_nucleotide.fasta", "filtered/cds_protein.fasta",
-                "validation/validation.json", "validation/validation.tsv",
+                "validation/validation.json",
             }
             self.assertEqual(
                 {path.relative_to(output).as_posix() for path in output.rglob("*") if path.is_file()},
@@ -345,7 +345,7 @@ class AnnostatTests(unittest.TestCase):
             self.assertRegex(written_summary["scientific_fingerprint"], r"^[0-9a-f]{64}$")
             self.assertEqual(written_summary["input_files"]["fasta"], str(fasta))
             self.assertEqual(written_summary["top_codons"][0]["codon"], "ATG")
-            self.assertEqual(len(written_summary["output_files"]), 17)
+            self.assertEqual(len(written_summary["output_files"]), 16)
             self.assertEqual(written_summary["filtered_export"]["selected_cds_count"], 1)
             self.assertIn("coding_density_percent", written_summary["quality_control"])
             self.assertIn("stage_seconds", written_summary["performance"])
