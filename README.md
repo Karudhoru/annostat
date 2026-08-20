@@ -40,7 +40,7 @@ self-contained HTML reports, CDS sequence exports, and editable SVG figures.
 - Supports optional CDS exports filtered by length, COG annotation, and
   hypothetical-protein status without changing the complete analysis
 - Builds a self-contained offline HTML report with provenance and performance timings
-- Saves three focused, dependency-free SVG charts for COG categories, CDS lengths,
+- Saves three focused, publication-ready SVG charts for COG categories, CDS lengths,
   and table-aware start codons; the COG chart is omitted when the source has no
   COG data
 - Streams CDS processing and FASTA generation to reduce runtime and peak memory
