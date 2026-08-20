@@ -414,7 +414,7 @@ results/
 │   └── annotation_issues.csv
 ├── validation/
 │   ├── validation.json
-│   └── validation.tsv
+│   └── validation.tsv (when findings are present)
 ├── sequences/
 │   ├── cds_nucleotide.fasta
 │   └── cds_protein.fasta

@@ -235,7 +235,7 @@ def _run_analysis(
         tables_dir / "annotation_issues.csv",
         quality_findings,
     )
-    write_validation(output_dir / "validation", validation)
+    validation_files = write_validation(output_dir / "validation", validation)
     if active_filter.active:
         write_overview(
             filtered_dir / f"features.{table_format}",
@@ -313,8 +313,7 @@ def _run_analysis(
         "tables/start_codons.csv",
         "tables/cog_categories.csv",
         "tables/annotation_issues.csv",
-        "validation/validation.json",
-        "validation/validation.tsv",
+        *(path.relative_to(output_dir).as_posix() for path in validation_files),
         "sequences/cds_nucleotide.fasta",
         "sequences/cds_protein.fasta",
         "plots/cds_lengths.svg",
