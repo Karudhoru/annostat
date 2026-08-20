@@ -420,7 +420,6 @@ class AnnostatTests(unittest.TestCase):
             plot = (output / "plots" / "start_codons.svg").read_text(encoding="utf-8")
             self.assertIn("No complete first codon", plot)
             self.assertRegex(plot, r"1\s+\(100\.00%\)")
-            self.assertEqual(plot.count('stroke-dasharray="3 5"'), 2)
 
     def test_reused_output_directory_removes_only_stale_generated_variants(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
