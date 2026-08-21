@@ -107,7 +107,7 @@ jobs:
       - name: Install and test the wheel in isolation
         run: |
           python -m venv "$RUNNER_TEMP/wheel-test"
-          "$RUNNER_TEMP/wheel-test/bin/python" -m pip install --no-index dist/*.whl
+          "$RUNNER_TEMP/wheel-test/bin/python" -m pip install dist/*.whl
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/wheel-test/bin/annostat" --version
           "$RUNNER_TEMP/wheel-test/bin/annostat" analyze --help
